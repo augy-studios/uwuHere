@@ -3,8 +3,55 @@
     "version": 2,
     "cleanUrls": true,
     "regions": ["sin1"],
-    "rewrites": [{
-        "source": "/",
-        "destination": "/"
-    }]
+    "crons": [{
+        "path": "/api/cron/purge",
+        "schedule": "17 19 * * *"
+    }],
+    "headers": [{
+            "source": "/sw.js",
+            "headers": [{
+                    "key": "Cache-Control",
+                    "value": "public, max-age=0, must-revalidate"
+                },
+                {
+                    "key": "Service-Worker-Allowed",
+                    "value": "/"
+                }
+            ]
+        },
+        {
+            "source": "/manifest.json",
+            "headers": [{
+                "key": "Cache-Control",
+                "value": "public, max-age=0, must-revalidate"
+            }]
+        },
+        {
+            "source": "/(index.html|host|host.html|join|join.html)?",
+            "headers": [{
+                "key": "Cache-Control",
+                "value": "public, max-age=0, must-revalidate"
+            }]
+        },
+        {
+            "source": "/(.*)",
+            "headers": [{
+                    "key": "X-Content-Type-Options",
+                    "value": "nosniff"
+                },
+                {
+                    "key": "Referrer-Policy",
+                    "value": "strict-origin-when-cross-origin"
+                },
+                {
+                    "key": "X-Frame-Options",
+                    "value": "SAMEORIGIN"
+                },
+                {
+                    "key": "Permissions-Policy",
+                    "value": "geolocation=(self), camera=(), microphone=()"
+                }
+            ]
+        }
+    ]
 }

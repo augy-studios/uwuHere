@@ -1,0 +1,672 @@
+/* uwuHere layout. Every colour here comes from a token in theme.css, except
+   the event's own button colour, which is data a host picks and arrives as
+   --event-color, and the QR code, which must stay dark on white to scan. */
+
+/* ---- layering ----
+   content < edge tray (800) < update bar (900) < modals (1000) < toast */
+.modal-backdrop { z-index: 1000; }
+
+:focus-visible { outline: 2px solid var(--brand-ink); outline-offset: 2px; }
+
+/* Read by a screen reader, not drawn. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* ---- update prompt bar (update-bar-spec.md) ----
+   Full width at the top of the document, quieter than the page's own
+   heading, tinted enough to read as a notice rather than part of the
+   layout. Sticky, so the tray below it (which reads --banner-h) stays put. */
+.update-notice {
+  position: sticky;
+  top: 0;
+  z-index: 900;
+  background: color-mix(in srgb, var(--brand) 12%, var(--surface-strong));
+  border-bottom: 1px solid var(--surface-border);
+  backdrop-filter: blur(18px) saturate(150%);
+  -webkit-backdrop-filter: blur(18px) saturate(150%);
+  color: var(--ink);
+  font-size: 0.875rem;
+}
+
+.update-notice-inner {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  max-width: 72rem;
+  margin: 0 auto;
+  padding: 0.5rem 1rem;
+  /* Under the notch on a phone, where the bar is the topmost thing on screen. */
+  padding-top: max(0.5rem, env(safe-area-inset-top));
+}
+
+.update-notice p { flex: 1 1 auto; min-width: 0; }
+.update-notice .btn { flex: none; }
+
+/* ---- edge tray (edge-tray-spec.md) ---- */
+:root {
+  --glass-btn: 44px;
+  --edge: max(16px, calc(env(safe-area-inset-right) + 16px));
+  --tray-top: max(calc(var(--banner-h, 0px) + 14px), calc(env(safe-area-inset-top) + 14px));
+  --tray-time: 0.34s;
+  --tray-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  /* The selected tray item is a brand-tracking fill, per uwuapps-theme.md. */
+  --accent-fill: var(--brand-fill);
+  --on-accent: var(--on-brand);
+}
+
+/* Fixed top right. Lets clicks through except on its children. */
+.hud-right {
+  position: fixed;
+  z-index: 800;
+  top: var(--tray-top);
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  pointer-events: none;
+  transition: top 0.2s ease;
+}
+.hud-right > * { pointer-events: auto; }
+
+/* The tray: tab + column. Collapsed, the whole thing shifts right until only
+   the tab is left, flush with the edge. */
+.tray {
+  --tray-shift: calc(var(--glass-btn) + 8px + var(--edge));
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  transition: transform var(--tray-time) var(--tray-ease);
+}
+.tray.collapsed { transform: translateX(var(--tray-shift)); }
+
+.tray-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: var(--glass-btn);
+  padding: 0;
+  border-radius: 12px;
+  background: var(--surface);
+  backdrop-filter: blur(18px) saturate(150%);
+  -webkit-backdrop-filter: blur(18px) saturate(150%);
+  border: 1px solid var(--surface-border);
+  box-shadow: var(--shadow);
+  color: var(--ink);
+  cursor: pointer;
+  transition: border-radius var(--tray-time) var(--tray-ease);
+}
+.tray-tab svg { width: 16px; height: 16px; transition: transform var(--tray-time) var(--tray-ease); }
+/* At the edge it is a tab: flat on the side the screen cuts off. */
+.tray.collapsed .tray-tab { border-radius: 12px 0 0 12px; border-right: none; }
+.tray.collapsed .tray-tab svg { transform: rotate(180deg); }
+
+.tray-buttons {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  margin-right: var(--edge);
+}
+
+/* Separates the page's own actions from the global ones. */
+.tray-rule {
+  width: 24px;
+  height: 1px;
+  margin: 2px 0;
+  background: color-mix(in srgb, var(--ink) 25%, transparent);
+}
+
+.glass-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--glass-btn);
+  height: var(--glass-btn);
+  padding: 0;
+  border-radius: 14px;
+  background: var(--surface);
+  backdrop-filter: blur(18px) saturate(150%);
+  -webkit-backdrop-filter: blur(18px) saturate(150%);
+  border: 1px solid var(--surface-border);
+  box-shadow: var(--shadow);
+  color: var(--ink);
+  cursor: pointer;
+  transition: transform 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+.glass-btn:hover { transform: translateY(-1px); background: var(--surface-strong); }
+.glass-btn svg { width: 22px; height: 22px; }
+
+/* The buttons unroll: each fades in, slides back from the edge and grows,
+   18 ms after the one above it. They move by `translate` and `scale`, leaving
+   `transform` to the hover lift. After .glass-btn, so it wins. */
+.tray-buttons > * {
+  transition:
+    opacity calc(var(--tray-time) * 0.8) ease,
+    translate var(--tray-time) var(--tray-ease),
+    scale var(--tray-time) var(--tray-ease),
+    transform 0.15s ease,
+    background 0.15s ease,
+    color 0.15s ease;
+  /* Only opening is staggered: the delay comes from the state being entered. */
+  transition-delay: calc(var(--i, 0) * 18ms), calc(var(--i, 0) * 18ms), calc(var(--i, 0) * 18ms), 0s, 0s, 0s;
+}
+.tray-buttons > :nth-child(2) { --i: 1; }
+.tray-buttons > :nth-child(3) { --i: 2; }
+.tray-buttons > :nth-child(4) { --i: 3; }
+.tray-buttons > :nth-child(5) { --i: 4; }
+.tray-buttons > :nth-child(6) { --i: 5; }
+.tray-buttons > :nth-child(7) { --i: 6; }
+.tray.collapsed .tray-buttons > * {
+  opacity: 0;
+  translate: 12px 0;
+  scale: 0.85;
+  transition-delay: 0s;
+}
+
+.glass-btn[aria-current="page"],
+.glass-btn[aria-current="page"]:hover {
+  background: var(--accent-fill);
+  color: var(--on-accent);
+}
+
+.tray-tab:focus-visible,
+.glass-btn:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+/* No flash on load (spec 6.4): a stored collapse is painted collapsed from
+   the first frame, and tray.js removes this class a frame later. */
+.tray-start-collapsed .tray { transform: translateX(var(--tray-shift)); transition: none; }
+.tray-start-collapsed .tray-buttons > * { opacity: 0; translate: 12px 0; scale: 0.85; transition: none; }
+.tray-start-collapsed main, .tray-start-collapsed .brand { transition: none; }
+.tray-start-collapsed .tray-tab { border-radius: 12px 0 0 12px; border-right: none; }
+.tray-start-collapsed .tray-tab svg { transform: rotate(180deg); }
+
+/* ---- page ---- */
+main {
+  width: 100%;
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 14px;
+  padding-bottom: max(28px, env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* Keeping content clear of the tray (spec 5.1). For a 720px column the
+   column's edge meets the tray at about 920px. */
+main, .brand {
+  transition: padding-right var(--tray-time) var(--tray-ease),
+              padding-left var(--tray-time) var(--tray-ease);
+}
+@media (max-width: 920px) {
+  body.tray-open main { padding-right: calc(var(--glass-btn) + var(--edge) + 12px); }
+  /* Collapsed: the brand line alone clears the 24px tab by 10px. */
+  body:not(.tray-open) .brand { padding-right: 34px; }
+}
+
+/* The brand line: logo and name, nothing else, level with the tray's tab. */
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: var(--glass-btn);
+  font-size: 1.15rem;
+  color: var(--brand-ink);
+  text-decoration: none;
+}
+.brand img { width: 30px; height: 30px; border-radius: 9px; }
+
+.card {
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.stack { display: flex; flex-direction: column; gap: 12px; }
+
+.card h1,
+.card h2 { font-size: 1.15rem; color: var(--brand-ink); font-weight: 400; }
+.card-lead { font-size: 0.9rem; color: var(--muted); line-height: 1.45; }
+
+/* ---- buttons ---- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 10px 16px;
+  border-radius: 12px;
+  font-size: 0.9rem;
+  border: 1px solid var(--surface-border);
+  background: var(--surface-strong);
+  color: var(--ink);
+  text-decoration: none;
+  transition: transform 0.15s ease, background 0.15s ease, opacity 0.15s ease;
+}
+.btn:hover:not(:disabled) { transform: translateY(-1px); }
+.btn svg { width: 16px; height: 16px; }
+
+.btn-primary { background: var(--brand-fill); color: var(--on-brand); }
+.btn-primary:hover:not(:disabled) { background: var(--brand-fill-strong); }
+
+.btn-quiet { background: transparent; color: var(--muted-strong); }
+
+.btn-danger {
+  background: color-mix(in srgb, var(--error) 14%, transparent);
+  color: var(--error);
+  border-color: color-mix(in srgb, var(--error) 30%, transparent);
+}
+
+.btn-block { display: flex; width: 100%; padding: 12px 16px; }
+
+.action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.action-row .btn { flex: 1 1 auto; }
+
+.toggle-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px;
+}
+.toggle-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 10px;
+  border-radius: 12px;
+  font-size: 0.88rem;
+  background: var(--surface);
+  border: 1px solid var(--surface-border);
+  color: var(--muted-strong);
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.toggle-btn svg { width: 16px; height: 16px; }
+.toggle-btn[aria-pressed="true"] { background: var(--brand-fill); color: var(--on-brand); }
+
+/* ---- forms ---- */
+.field { display: flex; flex-direction: column; gap: 6px; }
+.field-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+.counter { font-variant-numeric: tabular-nums; }
+.counter.full { color: var(--warn); }
+.hint { font-size: 0.8rem; color: var(--muted); line-height: 1.4; }
+
+.input,
+.select {
+  width: 100%;
+  min-width: 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--surface-border);
+  background: var(--surface-strong);
+  color: var(--ink);
+  font-size: 1rem;
+}
+.input::placeholder { color: var(--muted-strong); opacity: 1; }
+
+/* Native pieces a stylesheet cannot reach (a select's open list, the colour
+   picker) follow the mode too. */
+:root[data-mode="light"] { color-scheme: light; }
+:root[data-mode="dark"] { color-scheme: dark; }
+
+/* The password checklist. Each line carries its state in an icon and in
+   words, not in colour alone. */
+.pw-checks { list-style: none; display: flex; flex-direction: column; gap: 4px; }
+.pw-checks li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+.pw-checks li svg { width: 14px; height: 14px; flex: none; }
+.pw-checks li.ok { color: var(--ok); }
+
+.code-input {
+  width: 100%;
+  padding: 12px;
+  border-radius: 16px;
+  border: 1px solid var(--surface-border);
+  background: var(--surface-strong);
+  color: var(--ink);
+  font-size: 1.6rem;
+  letter-spacing: 0.2em;
+  text-indent: 0.2em;
+  text-align: center;
+  text-transform: uppercase;
+}
+.code-input::placeholder { color: var(--muted-strong); opacity: 1; }
+
+.inline-form { display: flex; gap: 8px; }
+.inline-form .input,
+.inline-form .code-input { flex: 1 1 auto; }
+
+.colour-row { display: flex; align-items: center; gap: 12px; }
+input[type="color"] {
+  flex: none;
+  width: 48px;
+  height: 48px;
+  padding: 3px;
+  border-radius: 14px;
+  border: 1px solid var(--surface-border);
+  background: var(--surface-strong);
+  cursor: pointer;
+}
+input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
+input[type="color"]::-webkit-color-swatch { border: none; border-radius: 10px; }
+input[type="color"]::-moz-color-swatch { border: none; border-radius: 10px; }
+
+/* ---- banners and status ---- */
+.banner {
+  padding: 10px 12px;
+  border-radius: 12px;
+  font-size: 0.88rem;
+  line-height: 1.4;
+  background: var(--surface-strong);
+}
+.banner.error { background: color-mix(in srgb, var(--error) 14%, transparent); color: var(--error); }
+.banner.warn { background: color-mix(in srgb, var(--warn) 14%, transparent); color: var(--warn); }
+.banner.ok { background: color-mix(in srgb, var(--ok) 14%, transparent); color: var(--ok); }
+
+.status-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.88rem;
+  color: var(--muted);
+  line-height: 1.4;
+}
+.status-row svg { width: 16px; height: 16px; flex: none; }
+.status-row .btn { margin-left: auto; padding: 6px 12px; }
+.status-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--busy);
+  flex: none;
+}
+.status-dot.ok { background: var(--ok); }
+.status-dot.warn { background: var(--warn); }
+.status-dot.error { background: var(--error); }
+
+/* ---- home: the button preview ---- */
+.preview {
+  flex: 1 1 auto;
+  display: flex;
+  justify-content: center;
+  padding: 12px;
+  border-radius: 16px;
+  background: var(--surface);
+  border: 1px solid var(--surface-border);
+}
+.preview .here-btn { width: 150px; --here-size: 1.05rem; padding: 16px; box-shadow: none; }
+
+.hosted-list { list-style: none; display: flex; flex-direction: column; gap: 6px; }
+.hosted-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: var(--surface);
+  border: 1px solid var(--surface-border);
+}
+.hosted-row a {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--ink);
+  text-decoration: none;
+}
+.hosted-title { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hosted-meta { display: block; font-size: 0.78rem; color: var(--muted-strong); }
+
+/* ---- host: sharing ---- */
+.code-display {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  padding: 14px;
+  border-radius: 16px;
+  background: var(--brand-fill);
+  color: var(--on-brand);
+  border: 1px solid var(--surface-border);
+  font-size: 2.2rem;
+  letter-spacing: 0.22em;
+  text-indent: 0.22em;
+  font-variant-numeric: tabular-nums;
+  user-select: text;
+  transition: background 0.15s ease, transform 0.15s ease;
+}
+.code-display:hover { background: var(--brand-fill-strong); }
+.code-display:active { transform: scale(0.99); }
+
+/* Centred, with its white quiet zone, so a phone pointed at the middle of the
+   screen finds it (STUN-p2p-spec.md, Pairing codes). */
+.qr-holder {
+  display: flex;
+  justify-content: center;
+  padding: 12px;
+  border-radius: 16px;
+  background: var(--surface);
+  border: 1px solid var(--surface-border);
+}
+.qr-holder svg { width: min(220px, 60vw); height: auto; aspect-ratio: 1; }
+/* Fixed dark-on-white whatever the theme: a scanner needs the contrast, and a
+   dark-mode inversion is not something every phone camera app reads. */
+.qr-holder .qr-bg { fill: #ffffff; }
+.qr-holder .qr-fg { fill: #121815; }
+
+/* The big QR view. As wide as the screen allows, and as tall as it allows
+   with room left for the code and link under it. */
+.modal.present { max-width: min(640px, 100%); max-height: 96vh; align-items: stretch; text-align: center; }
+.present-event { font-size: 1.1rem; color: var(--ink); overflow-wrap: anywhere; }
+.present-qr svg { width: min(100%, 62vh); }
+.present-code {
+  font-size: clamp(2rem, 8vw, 3.2rem);
+  letter-spacing: 0.22em;
+  text-indent: 0.22em;
+  color: var(--brand-ink);
+  font-variant-numeric: tabular-nums;
+  user-select: text;
+}
+
+.share-link {
+  font-size: 0.85rem;
+  color: var(--muted);
+  text-align: center;
+  word-break: break-all;
+  user-select: text;
+}
+
+/* ---- host: the list ---- */
+.list-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.list-count { font-size: 0.88rem; color: var(--muted); }
+
+.add-form { display: flex; flex-wrap: wrap; gap: 8px; }
+.add-form .input { flex: 1 1 160px; }
+
+.attendee-list { list-style: none; display: flex; flex-direction: column; gap: 6px; }
+.attendee {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: var(--surface);
+  border: 1px solid var(--surface-border);
+}
+.attendee-main { flex: 1 1 auto; min-width: 0; }
+.attendee-name { display: block; overflow-wrap: anywhere; }
+.attendee-note { display: block; font-size: 0.8rem; color: var(--muted); overflow-wrap: anywhere; }
+.attendee-meta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+  flex: none;
+  max-width: 50%;
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 0.74rem;
+  white-space: nowrap;
+  background: var(--surface-strong);
+  color: var(--muted-strong);
+}
+.chip svg { width: 12px; height: 12px; }
+.chip.warn { background: color-mix(in srgb, var(--warn) 14%, transparent); color: var(--warn); }
+.chip.busy { background: color-mix(in srgb, var(--busy) 16%, transparent); color: var(--ink); }
+
+.remove-btn { flex: none; background: transparent; border-color: transparent; color: var(--muted-strong); }
+.remove-btn:hover { background: var(--surface-strong); border-color: var(--surface-border); }
+.remove-btn.confirming {
+  width: auto;
+  padding: 0 10px;
+  font-size: 0.8rem;
+  background: color-mix(in srgb, var(--error) 14%, transparent);
+  color: var(--error);
+}
+
+.empty { font-size: 0.9rem; color: var(--muted); text-align: center; padding: 10px; }
+
+/* ---- join: the big button ---- */
+.join-head { text-align: center; display: flex; flex-direction: column; gap: 4px; }
+.join-head h1 { font-size: 1.4rem; color: var(--brand-ink); font-weight: 400; overflow-wrap: anywhere; }
+.join-head p { font-size: 0.9rem; color: var(--muted); }
+
+.here-wrap {
+  display: flex;
+  justify-content: center;
+  padding: 18px 0 6px;
+}
+
+/* A circle in the host's colour. --event-color and --on-event are set from
+   the event by join.js; until then it is the brand. The label is capped at
+   20 characters and sized by length in JS (--here-size), so it always sits
+   inside the circle, wrapping onto two lines at most. */
+.here-btn {
+  --event-color: var(--brand);
+  --on-event: var(--on-brand);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: min(72vw, 280px);
+  aspect-ratio: 1;
+  padding: 30px;
+  border-radius: 50%;
+  background: var(--event-color);
+  color: var(--on-event);
+  border: 1px solid color-mix(in srgb, var(--ink) 18%, transparent);
+  box-shadow: var(--shadow), 0 0 0 10px color-mix(in srgb, var(--event-color) 30%, transparent);
+  font-size: var(--here-size, 2rem);
+  line-height: 1.1;
+  text-align: center;
+  overflow-wrap: anywhere;
+  touch-action: manipulation;
+  transition: transform 0.15s ease, box-shadow 0.2s ease, opacity 0.2s ease;
+}
+.here-btn:hover:not([aria-disabled="true"]) { transform: translateY(-2px); }
+.here-btn:active:not([aria-disabled="true"]) { transform: scale(0.97); }
+.here-btn:focus-visible { outline: 3px solid var(--brand-ink); outline-offset: 14px; }
+.here-btn svg { width: 40px; height: 40px; }
+.here-sub { font-size: 0.85rem; opacity: 0.85; }
+
+.here-btn[aria-disabled="true"] { cursor: default; }
+.here-btn.is-paused { opacity: 0.55; }
+
+/* Working: the ring breathes. Reduced motion stills it via theme.css. */
+.here-btn.is-busy { animation: here-ring 1.4s ease-in-out infinite; }
+@keyframes here-ring {
+  50% { box-shadow: var(--shadow), 0 0 0 22px color-mix(in srgb, var(--event-color) 12%, transparent); }
+}
+
+.here-status {
+  min-height: 2.6em;
+  text-align: center;
+  font-size: 0.95rem;
+  line-height: 1.4;
+  color: var(--muted);
+}
+.here-status.error { color: var(--error); }
+.here-status.ok { color: var(--ok); }
+
+.leave-btn { align-self: center; width: min(72vw, 280px); }
+
+.method-note { text-align: center; font-size: 0.8rem; color: var(--muted); line-height: 1.4; }
+
+/* ---- toast ---- */
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(24px + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  z-index: 1100;
+  max-width: calc(100vw - 32px);
+  padding: 10px 16px;
+  border-radius: 999px;
+  font-size: 0.88rem;
+  background: var(--brand-fill);
+  color: var(--on-brand);
+  border: 1px solid var(--surface-border);
+  box-shadow: var(--shadow);
+  transition: opacity 0.18s ease, transform 0.18s ease, visibility 0s linear 0s;
+}
+.toast.hidden {
+  opacity: 0;
+  visibility: hidden;
+  transform: translateX(-50%) translateY(8px);
+  transition: opacity 0.18s ease, transform 0.18s ease, visibility 0s linear 0.18s;
+}
+
+.modal p.modal-text { font-size: 0.9rem; line-height: 1.45; color: var(--ink); }
+
+@media (max-width: 480px) {
+  :root {
+    --glass-btn: 40px;
+    --edge: max(10px, calc(env(safe-area-inset-right) + 10px));
+  }
+  main { padding: 10px; padding-bottom: max(24px, env(safe-area-inset-bottom)); }
+  .card { padding: 14px; }
+  .code-display { font-size: 1.8rem; }
+  .attendee-meta { max-width: 45%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hud-right, .tray, .tray-tab, .tray-tab svg, .tray-buttons > *, .glass-btn, main, .brand {
+    transition-duration: 0.001ms !important;
+    transition-delay: 0s !important;
+  }
+}

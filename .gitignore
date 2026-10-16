@@ -1,0 +1,20 @@
+# Secrets. .env.example is the committed template; anything with real values
+# stays out of the repo.
+.env
+.env.*
+!.env.example
+
+# Vercel
+.vercel
+
+# Local tooling
+node_modules/
+*.log
+
+# Editors and operating systems
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+Desktop.ini

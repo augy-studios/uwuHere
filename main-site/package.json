@@ -1,0 +1,12 @@
+{
+  "name": "uwuhere",
+  "private": true,
+  "type": "module",
+  "description": "uwuHere: the static site and its Vercel functions. No build step.",
+  "scripts": {
+    "check": "node check-precache.js"
+  },
+  "dependencies": {
+    "bcryptjs": "3.0.3"
+  }
+}

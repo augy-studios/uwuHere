@@ -1,7 +1,7 @@
 {
     "name": "uwuHere by UwU Apps",
     "short_name": "uwuHere",
-    "description": "A simple uwuhere app; view live uwuhere at a glance!",
+    "description": "Take attendance in one tap. People check in when they're near the host.",
     "icons": [{
             "src": "HAT-192.png",
             "type": "image/png",
@@ -27,8 +27,8 @@
         }
     ],
     "start_url": "/",
-    "theme_color": "#cfc",
-    "background_color": "#cfc",
+    "theme_color": "#ccffcc",
+    "background_color": "#ccffcc",
     "display": "standalone",
     "display_override": ["fullscreen", "minimal-ui", "window-controls-overlay"],
     "orientation": "any",
@@ -37,8 +37,8 @@
     "scope": "/",
     "lang": "en",
     "categories": [
-        "entertainment",
-        "lifestyle",
+        "productivity",
+        "education",
         "utilities"
     ]
 }

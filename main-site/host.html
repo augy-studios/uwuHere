@@ -1,0 +1,323 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <!-- Apply the saved theme before first paint. Same key as APP_KEY in js/theme.js. -->
+    <script>
+        (function () {
+            var k = "uwuhere";
+            var m = "light";
+            var c = "classic";
+            try {
+                m = localStorage.getItem(k + ".mode") || "light";
+                c = localStorage.getItem(k + ".colorTheme") || "classic";
+            } catch (e) { }
+
+            // Time based mode. Resolved here rather than in theme.js because
+            // theme.js runs after first paint, and an evening reader would
+            // otherwise watch a white page turn dark. Keep the two hours in step
+            // with LIGHT_FROM_HOUR and LIGHT_UNTIL_HOUR in theme.js.
+            document.documentElement.setAttribute("data-mode-preference", m);
+            if (m === "time") {
+                var h = new Date().getHours();
+                m = h >= 9 && h < 18 ? "light" : "dark";
+            }
+
+            document.documentElement.setAttribute("data-mode", m);
+            document.documentElement.setAttribute("data-color-theme", c);
+        })();
+    </script>
+
+    <!-- Paint a collapsed edge tray collapsed from the first frame, so a
+         returning reader does not watch it slide shut. Same key as js/tray.js. -->
+    <script>
+        try {
+            if (localStorage.getItem("uwuhere.trayOpen") === "0")
+                document.documentElement.classList.add("tray-start-collapsed");
+        } catch (e) { }
+    </script>
+
+    <!-- Google tag (gtag.js) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-FMCYFTFPEL"></script>
+    <script>
+        window.dataLayer = window.dataLayer || [];
+
+        function gtag() {
+            dataLayer.push(arguments);
+        }
+        gtag('js', new Date());
+
+        gtag('config', 'G-FMCYFTFPEL');
+    </script>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9715826188316382"
+        crossorigin="anonymous"></script>
+
+    <link rel="manifest" href="/manifest.json" />
+
+    <meta charset="utf-8">
+    <title>Host | uwuHere | UwU Apps</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="description" content="Take attendance in one tap. People check in when they're near the host.">
+    <meta name="robots" content="noindex">
+
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="uwuHere | UwU Apps" />
+    <meta property="og:site_name" content="UwU Apps" />
+    <meta property="og:description" content="Take attendance in one tap. People check in when they're near the host." />
+
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Jua&display=swap">
+    <link rel="stylesheet" href="/css/theme.css">
+    <link rel="stylesheet" href="/css/app.css">
+    <meta name="theme-color" content="#ccffcc" />
+
+    <!-- Embed Image -->
+    <link rel="apple-touch-icon" href="/HAT-192.png">
+    <link rel="icon" href="/favicon.ico">
+    <link rel="shortcut icon" href="/favicon.ico">
+    <meta name="twitter:card" content="summary">
+    <meta name="twitter:image:src" content="/HAT-main.png">
+    <meta property="og:image" content="/HAT-main.png" />
+</head>
+
+<body>
+    <!-- Edge tray (edge-tray-spec.md, js/tray.js). -->
+    <div class="hud-right">
+        <div id="tray" class="tray">
+            <button id="trayTab" class="tray-tab" type="button"
+                aria-controls="trayButtons" aria-expanded="true" aria-label="Hide menu" title="Hide menu">
+                <span data-icon="chevronRight"></span>
+            </button>
+            <div id="trayButtons" class="tray-buttons">
+                <a class="glass-btn" href="/" aria-label="Home" title="Home"><span data-icon="home"></span></a>
+                <button id="qrTrayBtn" class="glass-btn" type="button" aria-haspopup="dialog" hidden
+                    aria-label="Show the QR code" title="Show the QR code"><span data-icon="qr"></span></button>
+                <button id="settingsBtn" class="glass-btn" type="button" aria-haspopup="dialog" hidden
+                    aria-label="Event settings" title="Event settings"><span data-icon="settings"></span></button>
+                <button id="csvTrayBtn" class="glass-btn" type="button" hidden
+                    aria-label="Download the list as CSV" title="Download the list as CSV"><span data-icon="download"></span></button>
+                <span class="tray-rule" aria-hidden="true"></span>
+                <button id="themeBtn" class="glass-btn" type="button" aria-haspopup="dialog"
+                    aria-label="Theme" title="Theme"><span data-icon="sun"></span></button>
+            </div>
+        </div>
+    </div>
+
+    <main>
+        <a class="brand" href="/">
+            <img src="/HAT-192.png" alt="" width="30" height="30">
+            <span>uwuHere</span>
+        </a>
+
+        <!-- No code, or an event that no longer exists. -->
+        <section class="glass card" id="missingView" hidden>
+            <h1 id="missingTitle">No event here</h1>
+            <p class="card-lead" id="missingText"></p>
+            <a class="btn btn-primary btn-block" href="/"><span data-icon="home"></span>Go home</a>
+        </section>
+
+        <!-- This browser does not hold the host key. -->
+        <section class="glass card" id="lockedView" hidden>
+            <h1>Open this event</h1>
+            <p class="card-lead" id="lockedText">Enter the password set when this event was made.</p>
+            <form class="inline-form" id="unlockForm" novalidate>
+                <input class="input" id="unlockPassword" type="password" autocomplete="current-password"
+                    aria-label="Event password" placeholder="Password">
+                <button class="btn btn-primary" type="submit"><span data-icon="lock"></span>Open</button>
+            </form>
+            <p class="banner error" id="unlockError" hidden></p>
+        </section>
+
+        <div class="stack" id="hostView" hidden>
+            <section class="glass card" aria-labelledby="eventTitle">
+                <h1 id="eventTitle"></h1>
+
+                <p class="banner" id="endedBanner" hidden></p>
+
+                <div class="stack" id="shareBlock">
+                    <p class="card-lead">People check in at this link, or by scanning the code.</p>
+                    <button class="code-display" id="codeBtn" type="button"
+                        aria-label="Event code, tap to copy the link" title="Tap to copy the link"></button>
+                    <div class="qr-holder" id="qrHolder"></div>
+                    <p class="share-link" id="shareLink"></p>
+                    <button class="btn btn-primary btn-block" id="qrShowBtn" type="button" aria-haspopup="dialog">
+                        <span data-icon="qr"></span>Show the QR code big
+                    </button>
+
+                    <div class="status-row" id="p2pRow" hidden>
+                        <span class="status-dot" id="p2pDot"></span>
+                        <span id="p2pText"></span>
+                        <button class="btn" id="p2pRetry" type="button" hidden>
+                            <span data-icon="refresh"></span>Retry
+                        </button>
+                    </div>
+                    <div class="status-row" id="locRow" hidden>
+                        <span data-icon="pin"></span>
+                        <span id="locText"></span>
+                    </div>
+                    <p class="banner warn" id="pausedBanner" hidden>Check-ins are paused. Nobody new can check in until you resume.</p>
+                </div>
+
+                <p class="banner" id="syncBanner" hidden></p>
+
+                <div class="action-row" id="liveActions">
+                    <button class="btn" id="pauseBtn" type="button"></button>
+                    <button class="btn" id="csvBtn" type="button"><span data-icon="download"></span>CSV</button>
+                    <button class="btn btn-danger" id="endBtn" type="button"><span data-icon="stop"></span>End event</button>
+                </div>
+            </section>
+
+            <section class="glass card" aria-labelledby="listTitle">
+                <div class="list-head">
+                    <h2 id="listTitle">Here</h2>
+                    <span class="list-count" id="listCount" aria-live="polite"></span>
+                </div>
+
+                <form class="add-form" id="addForm" novalidate>
+                    <input class="input" id="addName" type="text" maxlength="60" autocomplete="off"
+                        aria-label="Name to add by hand" placeholder="Add someone by hand">
+                    <input class="input" id="addNote" type="text" maxlength="120" autocomplete="off" hidden>
+                    <button class="btn" type="submit"><span data-icon="plus"></span>Add</button>
+                </form>
+
+                <ul class="attendee-list" id="attendeeList"></ul>
+                <p class="empty" id="emptyList">Nobody yet.</p>
+            </section>
+        </div>
+    </main>
+
+    <!-- Event settings -->
+    <div class="modal-backdrop hidden" id="settingsModal">
+        <div class="modal glass" role="dialog" aria-modal="true" aria-labelledby="settingsModalTitle">
+            <div class="modal-head">
+                <h2 id="settingsModalTitle">Event settings</h2>
+                <button class="icon-btn small" type="button" data-close-modal="settingsModal" aria-label="Close">
+                    <span data-icon="close"></span>
+                </button>
+            </div>
+
+            <form class="stack" id="settingsForm" novalidate>
+                <label class="field">
+                    <span class="field-head">Event name <span class="counter" id="sTitleCount"></span></span>
+                    <input class="input" id="sTitle" type="text" maxlength="80" autocomplete="off">
+                </label>
+                <label class="field">
+                    <span class="field-head">Button text <span class="counter" id="sLabelCount"></span></span>
+                    <input class="input" id="sButtonLabel" type="text" maxlength="20" autocomplete="off" required>
+                </label>
+                <div class="field">
+                    <span class="field-head">Button colour</span>
+                    <div class="colour-row">
+                        <input type="color" id="sButtonColor" aria-label="Button colour">
+                        <div class="preview" aria-hidden="true">
+                            <span class="here-btn" id="sPreview"><span id="sPreviewLabel"></span></span>
+                        </div>
+                    </div>
+                </div>
+                <label class="field">
+                    <span class="field-head">Extra field for attendees <span class="counter" id="sNoteCount"></span></span>
+                    <input class="input" id="sNoteLabel" type="text" maxlength="40" autocomplete="off" placeholder="Optional, e.g. Student ID">
+                </label>
+                <div class="field">
+                    <span class="field-head">How people prove they are here</span>
+                    <div class="toggle-grid" id="sMethods">
+                        <button class="toggle-btn" type="button" data-method="p2p" aria-pressed="false">
+                            <span data-icon="wifi"></span>Same wifi
+                        </button>
+                        <button class="toggle-btn" type="button" data-method="location" aria-pressed="false">
+                            <span data-icon="pin"></span>Location
+                        </button>
+                    </div>
+                </div>
+                <div class="stack" id="sLocationBlock" hidden>
+                    <label class="field">
+                        <span class="field-head">Within</span>
+                        <select class="select" id="sRadius">
+                            <option value="50">50 m</option>
+                            <option value="100">100 m</option>
+                            <option value="200">200 m</option>
+                            <option value="500">500 m</option>
+                            <option value="1000">1 km</option>
+                        </select>
+                    </label>
+                    <button class="btn" id="sUseHere" type="button" aria-pressed="false">
+                        <span data-icon="pin"></span><span id="sUseHereText">Move the spot to where I am now</span>
+                    </button>
+                </div>
+                <p class="banner error" id="settingsError" hidden></p>
+                <button class="btn btn-primary btn-block" type="submit"><span data-icon="check"></span>Save</button>
+            </form>
+
+            <p class="modal-section-label section-head">Password</p>
+            <p class="hint" id="passwordState"></p>
+            <form class="inline-form" id="passwordForm" novalidate>
+                <input class="input" id="sPassword" type="password" minlength="15" maxlength="128"
+                    autocomplete="new-password" aria-label="New password" placeholder="New password"
+                    aria-describedby="sPwChecks">
+                <button class="btn" type="submit">Set</button>
+            </form>
+            <ul class="pw-checks" id="sPwChecks" hidden></ul>
+            <button class="btn btn-quiet" id="clearPassword" type="button" hidden>Remove the password</button>
+            <p class="banner error" id="passwordError" hidden></p>
+        </div>
+    </div>
+
+    <!-- The QR code, as large as the screen allows, for turning towards a room. -->
+    <div class="modal-backdrop hidden" id="qrModal">
+        <div class="modal glass present" role="dialog" aria-modal="true" aria-labelledby="qrModalTitle">
+            <div class="modal-head">
+                <h2 id="qrModalTitle">Scan to check in</h2>
+                <button class="icon-btn small" type="button" data-close-modal="qrModal" aria-label="Close">
+                    <span data-icon="close"></span>
+                </button>
+            </div>
+            <p class="present-event" id="qrModalEvent"></p>
+            <div class="qr-holder present-qr" id="qrModalHolder"></div>
+            <p class="present-code" id="qrModalCode"></p>
+            <p class="share-link" id="qrModalLink"></p>
+        </div>
+    </div>
+
+    <!-- End event -->
+    <div class="modal-backdrop hidden" id="endModal">
+        <div class="modal glass" role="dialog" aria-modal="true" aria-labelledby="endModalTitle">
+            <div class="modal-head">
+                <h2 id="endModalTitle">End this event?</h2>
+                <button class="icon-btn small" type="button" data-close-modal="endModal" aria-label="Close">
+                    <span data-icon="close"></span>
+                </button>
+            </div>
+            <p class="modal-text" id="endText"></p>
+            <button class="btn btn-block" id="endCsvBtn" type="button"><span data-icon="download"></span>Download the list first</button>
+            <p class="banner error" id="endError" hidden></p>
+            <div class="action-row">
+                <button class="btn" type="button" data-close-modal="endModal">Cancel</button>
+                <button class="btn btn-danger" id="endConfirm" type="button"><span data-icon="stop"></span>End event</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Theme -->
+    <div class="modal-backdrop hidden" id="themeModal">
+        <div class="modal glass" role="dialog" aria-modal="true" aria-labelledby="themeModalTitle">
+            <div class="modal-head">
+                <h2 id="themeModalTitle">Theme</h2>
+                <button class="icon-btn small" type="button" data-close-modal="themeModal" aria-label="Close">
+                    <span data-icon="close"></span>
+                </button>
+            </div>
+            <p class="modal-section-label">Mode</p>
+            <div class="mode-toggle" id="modeToggle">
+                <button class="mode-btn" type="button" data-mode="light" aria-pressed="false"><span data-icon="sun"></span>Light</button>
+                <button class="mode-btn" type="button" data-mode="dark" aria-pressed="false"><span data-icon="moon"></span>Dark</button>
+                <button class="mode-btn mode-btn-wide" type="button" data-mode="time" aria-pressed="false"><span data-icon="clock"></span>Time-based</button>
+            </div>
+            <p class="mode-note" id="modeNote" hidden></p>
+            <p class="modal-section-label">Brand colour</p>
+            <div class="swatch-grid" id="swatchGrid"></div>
+        </div>
+    </div>
+
+    <script type="module" src="/js/host.js"></script>
+</body>
+
+</html>
