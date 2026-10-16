@@ -1,14 +1,14 @@
 // The live checklist under a host password field.
 //
-// Mirrors api/_lib/password.js, which has the final say: NIST SP 800-63B-4
-// for a single-factor password, so 15 characters or more, no rules about
-// digits or symbols, and nothing predictable. The breach check only runs on
+// Mirrors api/_lib/password.js, which has the final say: after NIST SP
+// 800-63B-4, so 14 characters or more (one under NIST's 15, by choice), no
+// rules about digits or symbols, and nothing predictable. The breach check only runs on
 // the server, so here it is a promise rather than a tick. Change both
 // together.
 
 import { charCount, hydrateIcons, escapeHtml } from "./ui.js";
 
-export const PASSWORD_MIN = 15;
+export const PASSWORD_MIN = 14;
 export const PASSWORD_MAX = 128;
 
 const RUNS = [

@@ -16,8 +16,8 @@ export const LIMITS = {
   noteLabel: 40,
   name: 60,
   note: 120,
-  // NIST SP 800-63B-4 for a single-factor password. See _lib/password.js.
-  passwordMin: 15,
+  // After NIST SP 800-63B-4, one under its 15. See _lib/password.js.
+  passwordMin: 14,
   passwordMax: 128,
   radiusMin: 20,
   radiusMax: 2000,

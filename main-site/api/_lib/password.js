@@ -3,7 +3,8 @@
    The password is the only thing guarding an event's host page from another
    device, so it is a single-factor password, and the rules for those apply:
 
-     - At least 15 characters. Up to 128, past NIST's 64 floor.
+     - At least 14 characters, one under NIST's 15, by choice. Up to 128,
+       past NIST's 64 floor.
      - No composition rules. NIST says they SHALL NOT be imposed: forcing a
        digit and a symbol produces "Password1!", not strength.
      - Refused if it is on a blocklist of common, expected, or compromised

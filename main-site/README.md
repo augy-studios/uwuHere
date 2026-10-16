@@ -50,8 +50,8 @@ id, which only the attendee's browser has; the host only ever sees the hash.
 - **Host key.** Making an event returns a key, kept in this browser's
   storage. It is an HMAC of the event id, so nothing has to be stored for it.
 - **Password (optional).** Opens the host page on another device. Checked
-  against NIST SP 800-63B-4 for a single-factor password: at least 15
-  characters, no rules about symbols or digits, and refused if it is a repeat,
+  after NIST SP 800-63B-4 for a single-factor password: at least 14
+  characters (one under NIST's 15), no rules about symbols or digits, and refused if it is a repeat,
   a keyboard or alphabet run, contains the event's name or code, or appears in
   the Have I Been Pwned breach corpus (k-anonymity: only five hex characters of
   a SHA-1 leave the server). Stored as
