@@ -49,6 +49,27 @@ export function initTray() {
   trayTab.addEventListener("click", () => setTray(tray.classList.contains("collapsed")));
 }
 
+/**
+ * A button the Android app adds to the tray (js/app-update.js,
+ * js/app-notify.js), just above the theme button, with the global actions.
+ * Made here rather than shipped hidden in each page, as the website and the
+ * PWA never show them.
+ */
+export function addTrayButton({ id, icon, label, onClick }) {
+  const theme = document.getElementById("themeBtn");
+  if (!theme || document.getElementById(id)) return null;
+  const button = document.createElement("button");
+  button.id = id;
+  button.className = "glass-btn";
+  button.type = "button";
+  button.setAttribute("aria-label", label);
+  button.title = label;
+  button.innerHTML = `<span data-icon="${icon}"></span>`;
+  button.addEventListener("click", onClick);
+  theme.before(button);
+  return button;
+}
+
 // A sticky banner at the top (the update bar) publishes its height, so the
 // tray starts below it and glides when it comes or goes (spec 6.3).
 let sizer = null;

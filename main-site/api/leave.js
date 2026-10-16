@@ -12,6 +12,7 @@ import { endpoint, ok, readBody, dbError, HttpError } from "./_lib/http.js";
 import { rest } from "./_lib/supabase.js";
 import { hashDevice } from "./_lib/auth.js";
 import { requireEvent, findAttendeeByDevice, publicAttendee } from "./_lib/events.js";
+import { alertHost } from "./_lib/alerts.js";
 import * as v from "./_lib/validate.js";
 
 export default endpoint(["POST"], async (req, res) => {
@@ -36,7 +37,11 @@ export default endpoint(["POST"], async (req, res) => {
   if (!result.ok) throw dbError(result);
 
   const updated = result.data?.[0];
-  if (updated) return ok(res, { attendee: publicAttendee(updated), already: false });
+  if (updated) {
+    // The host's phones, in the Android app, if they asked (api/_lib/alerts.js).
+    await alertHost(event, { kind: "left", name: updated.name });
+    return ok(res, { attendee: publicAttendee(updated), already: false });
+  }
 
   const existing = await findAttendeeByDevice(event.id, hash);
   if (!existing) {

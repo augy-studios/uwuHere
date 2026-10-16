@@ -11,10 +11,17 @@ people, pause check-ins, download a CSV, and end the event.
 No accounts. The host page is kept in the browser that made the event, and an
 optional password opens it on another device.
 
+It also comes as an Android app: the same site in a Capacitor WebView, which
+adds what a web page can't do there (the host's screen kept on, the QR code at
+full brightness, the CSV saved to Downloads, check-in notifications) and
+updates itself from GitHub Releases. The website and PWA work as before.
+
 ## Repository layout
 
 ```text
 main-site/                      the app: static pages plus Vercel functions
+android/                        the Android app (Capacitor), see android/README.md
+release/                        built and signed APKs, one folder per version
 migrations/                     SQL to run once in the Supabase SQL editor
 uwuapps-theme.md                theme spec, shared across UwU Apps
 uwuapps-retrofit-time-mode.md   how time-based mode is added to the theme
@@ -37,6 +44,11 @@ check-in works, where data lives, and what to do before a deploy.
    `main-site/.env.example`. Vercel installs the one dependency (`bcryptjs`)
    from `main-site/package.json`.
 3. **Domain.** Point `here.uwuapps.org` at the Vercel project.
+4. **Android app (optional).** Build it with one command from the project
+   root, `powershell -ExecutionPolicy Bypass -File android\build-apk.ps1`, which
+   puts the signed APK in `release/<version>/`. `android/README.md` covers the
+   first build's signing key, `release/README.md` publishing it, and
+   `android/FIREBASE-SETUP.md` its notifications.
 
 ### Migrations
 

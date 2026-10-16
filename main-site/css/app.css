@@ -164,6 +164,11 @@
 .tray-buttons > :nth-child(5) { --i: 4; }
 .tray-buttons > :nth-child(6) { --i: 5; }
 .tray-buttons > :nth-child(7) { --i: 6; }
+/* The host page's tray with the Android app's two buttons (js/app-notify.js,
+   js/app-update.js) runs to eight. */
+.tray-buttons > :nth-child(8) { --i: 7; }
+.tray-buttons > :nth-child(9) { --i: 8; }
+.tray-buttons > :nth-child(10) { --i: 9; }
 .tray.collapsed .tray-buttons > * {
   opacity: 0;
   translate: 12px 0;
@@ -652,6 +657,51 @@ input[type="color"]::-moz-color-swatch { border: none; border-radius: 10px; }
 }
 
 .modal p.modal-text { font-size: 0.9rem; line-height: 1.45; color: var(--ink); }
+
+/* ---- notifications (Android app only, js/app-notify.js) ---- */
+.toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: var(--surface);
+  border: 1px solid var(--surface-border);
+  cursor: pointer;
+}
+.toggle-row-text { display: flex; flex-direction: column; gap: 2px; font-size: 0.95rem; }
+.toggle-row-text small { font-size: 0.78rem; color: var(--muted-strong); line-height: 1.35; }
+
+.switch {
+  appearance: none;
+  -webkit-appearance: none;
+  flex-shrink: 0;
+  position: relative;
+  width: 44px;
+  height: 26px;
+  margin: 0;
+  border-radius: 13px;
+  background: color-mix(in srgb, var(--ink) 22%, transparent);
+  cursor: pointer;
+  transition: background 0.18s ease;
+}
+.switch::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--surface-strong);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  transition: translate 0.18s ease;
+}
+.switch:checked { background: var(--brand-ink); }
+.switch:checked::after { translate: 18px 0; background: #fff; }
+.switch:disabled { opacity: 0.5; cursor: progress; }
+#notifyNote[hidden] { display: none; }
 
 @media (max-width: 480px) {
   :root {

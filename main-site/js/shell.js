@@ -1,6 +1,7 @@
 // What every page shares: the theme and its modal (uwuapps-theme.md section
-// 6), the icons, the edge tray, modal closing, and the update bar. Each page
-// script calls bootShell() first and then does its own work.
+// 6), the icons, the edge tray, modal closing, and the update bar. In the
+// Android app, also the app's own update check and its notifications bell.
+// Each page script calls bootShell() first and then does its own work.
 
 import {
   COLOR_THEMES, applyColorTheme, applyMode, getStoredColorTheme, getStoredMode, getModePreference, initTheme,
@@ -8,6 +9,8 @@ import {
 import { hydrateIcons, openModal, closeModal } from "./ui.js";
 import { initTray } from "./tray.js";
 import { initUpdateBar } from "./sw-update.js";
+import { initAppUpdate } from "./app-update.js";
+import { initAppNotify } from "./app-notify.js";
 
 function buildThemeModal() {
   const grid = document.getElementById("swatchGrid");
@@ -97,4 +100,8 @@ export function bootShell() {
   wireModals();
   initTray();
   initUpdateBar();
+  // Both do nothing outside the app. The bell goes in first, so it sits above
+  // the update button.
+  initAppNotify();
+  initAppUpdate();
 }

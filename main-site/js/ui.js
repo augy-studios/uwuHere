@@ -30,6 +30,9 @@ export function closeModal(id) {
   const previous = returnFocus.get(id);
   returnFocus.delete(id);
   if (previous && document.contains(previous)) previous.focus({ preventScroll: true });
+  // However it was closed (its button, the backdrop, Escape), for a page that
+  // has something to undo, such as the QR code's full brightness.
+  document.dispatchEvent(new CustomEvent("uwu:modalclose", { detail: { id } }));
 }
 
 export function escapeHtml(value) {

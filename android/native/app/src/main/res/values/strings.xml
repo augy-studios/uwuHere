@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">uwuHere</string>
+    <string name="title_activity_main">uwuHere</string>
+    <string name="package_name">org.uwuapps.uwuhere</string>
+    <string name="custom_url_scheme">org.uwuapps.uwuhere</string>
+</resources>

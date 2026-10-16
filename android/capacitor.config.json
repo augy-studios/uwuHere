@@ -1,0 +1,21 @@
+{
+  "appId": "org.uwuapps.uwuhere",
+  "appName": "uwuHere",
+  "webDir": "www",
+  "server": {
+    "url": "https://here.uwuapps.org",
+    "errorPath": "offline.html"
+  },
+  "android": {
+    "path": "native",
+    "appendUserAgent": "uwuHereApp/1"
+  },
+  "plugins": {
+    "SystemBars": {
+      "insetsHandling": "css"
+    },
+    "PushNotifications": {
+      "presentationOptions": ["alert", "sound"]
+    }
+  }
+}

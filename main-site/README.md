@@ -90,6 +90,9 @@ js/password.js       the live password checklist, mirrors api/_lib/password.js
 js/geo.js            one Geolocation reading, with sentences for failures
 js/qr.js             QR encoder, so the code works offline (from uwuPromptr)
 js/icons.js, ui.js   inline SVG icons; modals, toasts, small helpers
+js/app-bridge.js     the channel to the Android app (../android), when open in it
+js/app-update.js     the app's own update check, and the tray's "Check for updates"
+js/app-notify.js     the app's notifications bell, and each event's check-in alerts
 sw.js                service worker: caches the shell, waits to update
 check-precache.js    checks sw.js's list against what is on disk
 api/                 Vercel functions, see below
@@ -107,21 +110,33 @@ api/                 Vercel functions, see below
 | `POST /api/host` | Everything the host does, by `action`: get, record, add, remove, pause, resume, update, password, end. |
 | `POST /api/unlock` | Password to host key, for another device. |
 | `GET /api/cron/purge` | The daily purge, run by Vercel Cron with `CRON_SECRET`. |
+| `GET /api/app-release` | The Android app's newest release on GitHub, for its updater. Cached at the edge for 10 minutes. |
+| `POST /api/push/release` | GitHub's webhook for a published release: tells the app's phones a new version is out. |
 
 Every answer is `{ ok: true, data }` or `{ ok: false, error, reason }`, sent
 `Cache-Control: no-store`. `error` is a sentence for a person; `reason` is a
-fixed slug the pages branch on. Shared code is in `api/_lib/`.
+fixed slug the pages branch on. Shared code is in `api/_lib/`. The two
+Android app endpoints answer in their own shapes, as GitHub and the app's
+updater expect (`api/app-release.js`, `api/push/release.js`).
+
+`/api/checkin` and `/api/leave` also notify the host's phones in the Android
+app, if they turned check-in notifications on (`api/_lib/alerts.js`). It is
+skipped without `FIREBASE_SERVICE_ACCOUNT`, and never fails the check-in.
 
 ## Environment
 
-Five variables, all server side, documented in `.env.example`:
+Five variables run the site, all server side, documented in `.env.example`:
 `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `UWUHERE_HOST_SECRET`,
 `UWUHERE_PASSWORD_PEPPER`, `CRON_SECRET`. Generate the three secrets with
 `openssl rand -hex 32`, and never change the host secret or the pepper once
-events exist.
+events exist. Changing the host secret also renames every event's check-in
+notification topic, so hosts reopen their pages to get them again.
 
-Two public IDs are written into each page's `<head>`, as in the template:
-`G-FMCYFTFPEL` (Google Analytics) and `ca-pub-9715826188316382` (AdSense).
+Three more, all optional, are for the Android app (`../android/FIREBASE-SETUP.md`):
+`FIREBASE_SERVICE_ACCOUNT`, `GITHUB_WEBHOOK_SECRET`, `GITHUB_TOKEN`.
+
+One public ID is written into each page's `<head>`, as in the template:
+`G-FMCYFTFPEL` (Google Analytics). There are no ads.
 
 ## Theme
 
@@ -159,6 +174,10 @@ be cached goes in its `DELIBERATELY_ABSENT` list with the reason.
 
 On `localhost` the worker goes to the network first, so edits show without a
 bump, and the bar can only be seen by bumping `VERSION`.
+
+In the Android app the same bar also announces a new version of the app
+itself (`js/app-update.js`); the site's own new version takes precedence, and
+the app's shows after the reload. `../android/README.md` has the app's checks.
 
 ### Checking check-in by hand
 

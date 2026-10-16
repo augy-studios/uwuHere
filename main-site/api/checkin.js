@@ -12,6 +12,7 @@ import { endpoint, ok, readBody, HttpError } from "./_lib/http.js";
 import { hashDevice } from "./_lib/auth.js";
 import { distanceMetres } from "./_lib/geo.js";
 import { requireEvent, insertAttendee, attendeeFields } from "./_lib/events.js";
+import { alertHost } from "./_lib/alerts.js";
 import * as v from "./_lib/validate.js";
 
 // A phone indoors commonly reports 20 to 80 m of accuracy. Up to this much of
@@ -67,6 +68,9 @@ export default endpoint(["POST"], async (req, res) => {
     method: "location",
     distance_m: Math.round(distance),
   });
+
+  // The host's phones, in the Android app, if they asked (api/_lib/alerts.js).
+  if (!result.already) await alertHost(event, { kind: "checkin", name: result.attendee.name });
 
   return ok(res, result, result.already ? 200 : 201);
 });

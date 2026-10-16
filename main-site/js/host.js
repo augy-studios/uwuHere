@@ -9,9 +9,17 @@
 // it goes into an outbox on this device, the attendee is told they are in,
 // and the outbox is sent when the connection comes back. People added by
 // hand while offline go the same way.
+//
+// In the Android app (js/app-bridge.js) a few things go through the app
+// instead: the screen kept on (the WebView has no Screen Wake Lock), the big
+// QR code at full brightness, the CSV saved to Downloads (the WebView cannot
+// download a file the page made), and this event's check-in notifications
+// (js/app-notify.js).
 
 import { bootShell } from "./shell.js";
 import { postJson } from "./api.js";
+import { AppBridge } from "./app-bridge.js";
+import { watchHostAlerts } from "./app-notify.js";
 import { Host, normaliseCode, isValidCode, PROTOCOL_VERSION } from "./p2p.js";
 import { qrToSvg } from "./qr.js";
 import { getPosition } from "./geo.js";
@@ -98,6 +106,9 @@ function applySnapshot(snapshot, { fromCache = false } = {}) {
   if (!fromCache) {
     store.saveHostCache(code, { event, attendees });
     store.saveHosted(code, hostKey, event);
+    // Check-ins by location reach this phone while the app is closed, until
+    // the event ends.
+    watchHostAlerts(hostKey, !event.ended);
   }
   render();
   syncP2p();
@@ -115,6 +126,7 @@ function upsertAttendee(attendee) {
 }
 
 function loseAccess() {
+  watchHostAlerts(hostKey, false);
   hostKey = null;
   store.forgetHosted(code);
   stopP2p();
@@ -122,6 +134,7 @@ function loseAccess() {
 }
 
 function eventGone() {
+  watchHostAlerts(hostKey, false);
   store.forgetHosted(code);
   stopP2p();
   event = null;
@@ -519,9 +532,21 @@ async function onPeerMessage(message, from) {
 }
 
 // The host screen has to stay on for same-wifi check-ins to reach it.
+let appAwake = false;
+
 async function updateWakeLock() {
   const want =
     host && (p2p.status === "waiting" || p2p.status === "connected") && document.visibilityState === "visible";
+
+  // The app's WebView has no navigator.wakeLock, so the app keeps its own
+  // window's screen on instead.
+  if (AppBridge.has("keepawake")) {
+    if (Boolean(want) !== appAwake) {
+      appAwake = Boolean(want);
+      AppBridge.call("Here", "keepAwake", { on: appAwake }).catch(() => {});
+    }
+    return;
+  }
 
   if (want && !wakeLock && "wakeLock" in navigator) {
     try {
@@ -565,10 +590,19 @@ function showQr() {
     $("qrModalHolder").dataset.link = link;
   }
   openModal("qrModal");
+  // In the app, the screen at full brightness while the code is up, so it
+  // scans from the back of a room. The phone's own setting is left alone.
+  if (AppBridge.has("brightness")) AppBridge.call("Here", "brightness", { max: true }).catch(() => {});
 }
 
 $("qrShowBtn").addEventListener("click", showQr);
 $("qrTrayBtn").addEventListener("click", showQr);
+
+document.addEventListener("uwu:modalclose", ({ detail }) => {
+  if (detail.id === "qrModal" && AppBridge.has("brightness")) {
+    AppBridge.call("Here", "brightness", { max: false }).catch(() => {});
+  }
+});
 
 $("pauseBtn").addEventListener("click", async () => {
   const button = $("pauseBtn");
@@ -655,10 +689,24 @@ function downloadCsv() {
 
   // The byte order mark is what makes Excel read the file as UTF-8.
   const csv = "﻿" + rows.map((row) => row.map(csvCell).join(",")).join("\r\n");
+  const name = `uwuhere-${code}-${stamp(new Date().toISOString()).slice(0, 10)}.csv`;
+
+  // The app's WebView cannot download a file the page made, so the app saves
+  // it: into Downloads, or on older Android wherever the host picks.
+  if (AppBridge.has("savefile")) {
+    AppBridge.call("Here", "saveFile", { name, text: csv, mime: "text/csv" })
+      .then((saved) => {
+        if (saved.where === "downloads") toast(`Saved to Downloads as ${name}`);
+        else if (saved.saved) toast("Saved");
+      })
+      .catch((cause) => toast(cause?.message || "Could not save the list."));
+    return;
+  }
+
   const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
   const a = document.createElement("a");
   a.href = url;
-  a.download = `uwuhere-${code}-${stamp(new Date().toISOString()).slice(0, 10)}.csv`;
+  a.download = name;
   document.body.append(a);
   a.click();
   a.remove();
@@ -907,6 +955,10 @@ window.addEventListener("offline", () => {
   setConnection("offline");
   renderP2p();
 });
+
+// In the app, same-wifi check-in can be up before the app has said what it
+// can do; once it has, the screen is kept on if it should be.
+if (AppBridge.native) AppBridge.ready(5000).then(updateWakeLock);
 
 async function boot() {
   if (!isValidCode(code)) {

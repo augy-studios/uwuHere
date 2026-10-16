@@ -4,6 +4,20 @@
 .env.*
 !.env.example
 
+# The Android app's signing key, its passwords, and Firebase's files, wherever
+# they end up. android/.gitignore covers its own folder; these catch a key
+# saved anywhere else in the repository by mistake.
+*.keystore
+*.jks
+*.p12
+*.pfx
+keystore.properties
+google-services.json
+*firebase-adminsdk*.json
+
+# release/<version>/uwuhere-<version>.apk is built by android/build-apk.ps1
+# and committed, so nothing under release/ is ignored.
+
 # Vercel
 .vercel
 
