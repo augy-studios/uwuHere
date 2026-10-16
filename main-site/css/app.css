@@ -388,20 +388,82 @@ main, .brand {
 .inline-form .input,
 .inline-form .code-input { flex: 1 1 auto; }
 
-.colour-row { display: flex; align-items: center; gap: 12px; }
-input[type="color"] {
-  flex: none;
-  width: 48px;
-  height: 48px;
-  padding: 3px;
-  border-radius: 14px;
+/* The picker beside the button's preview; on a phone the preview goes under. */
+.colour-row { display: flex; flex-wrap: wrap; align-items: stretch; gap: 12px; }
+
+/* ---- the colour picker (js/colour-picker.js) ----
+   A hue and saturation wheel, a brightness slider and a hex code box. The
+   wheel, the slider's track and the marker show colours for what they are:
+   like the event's button, a fixed-meaning exception to the theme's tokens. */
+.colour-picker {
+  flex: 0 1 190px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  margin: 0 auto;
+}
+.wheel-wrap {
+  position: relative;
+  width: min(190px, 100%);
+  aspect-ratio: 1;
+  border-radius: 50%;
   border: 1px solid var(--surface-border);
-  background: var(--surface-strong);
+  box-shadow: var(--shadow);
+  cursor: crosshair;
+  /* A finger on the wheel picks a colour rather than scrolling. */
+  touch-action: none;
+}
+.wheel-wrap:focus-visible { outline: 2px solid var(--brand-ink); outline-offset: 4px; }
+.wheel-canvas { display: block; width: 100%; height: 100%; border-radius: 50%; }
+.wheel-dot {
+  position: absolute;
+  width: 22px;
+  height: 22px;
+  margin: -11px 0 0 -11px;
+  border-radius: 50%;
+  border: 3px solid #ffffff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.3);
+  pointer-events: none;
+}
+.wheel-side { display: flex; flex-direction: column; gap: 6px; width: 100%; }
+.wheel-label { font-size: 0.8rem; color: var(--muted-strong); }
+/* The track runs from black to the picked colour at full brightness. */
+.brightness {
+  width: 100%;
+  height: 22px;
+  margin: 0 0 6px;
+  appearance: none;
+  -webkit-appearance: none;
+  border-radius: 999px;
+  border: 1px solid var(--surface-border);
+  background: linear-gradient(to right, #000000, var(--wheel-top, #ffffff));
   cursor: pointer;
 }
-input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
-input[type="color"]::-webkit-color-swatch { border: none; border-radius: 10px; }
-input[type="color"]::-moz-color-swatch { border: none; border-radius: 10px; }
+.brightness::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: #ffffff;
+  border: 2px solid rgba(0, 0, 0, 0.55);
+}
+.brightness::-moz-range-thumb {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #ffffff;
+  border: 2px solid rgba(0, 0, 0, 0.55);
+}
+.brightness:focus-visible { outline: 2px solid var(--brand-ink); outline-offset: 2px; }
+.hex-input {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.hex-input[aria-invalid="true"] { border-color: var(--error); }
+.hex-error { font-size: 0.78rem; color: var(--error); line-height: 1.35; }
+.hex-error:empty { display: none; }
 
 /* ---- banners and status ---- */
 .banner {
@@ -438,8 +500,9 @@ input[type="color"]::-moz-color-swatch { border: none; border-radius: 10px; }
 
 /* ---- home: the button preview ---- */
 .preview {
-  flex: 1 1 auto;
+  flex: 1 1 170px;
   display: flex;
+  align-items: center;
   justify-content: center;
   padding: 12px;
   border-radius: 16px;

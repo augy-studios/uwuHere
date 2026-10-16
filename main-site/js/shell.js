@@ -11,6 +11,7 @@ import { initTray } from "./tray.js";
 import { initUpdateBar } from "./sw-update.js";
 import { initAppUpdate } from "./app-update.js";
 import { initAppNotify } from "./app-notify.js";
+import { initColourPickers } from "./colour-picker.js";
 
 function buildThemeModal() {
   const grid = document.getElementById("swatchGrid");
@@ -94,6 +95,8 @@ function wireModals() {
 
 export function bootShell() {
   initTheme();
+  // Before the page's own script reads a picker's value.
+  initColourPickers();
   hydrateIcons();
   updateThemeButtonIcon();
   buildThemeModal();

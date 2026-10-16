@@ -49,7 +49,7 @@
 // the whole install. `node check-precache.js` keeps the list honest.
 //
 // VERSION is a plain integer, counting up by one.
-const VERSION = 6;
+const VERSION = 7;
 
 const SHELL = `uwuHere-shell-${VERSION}`;
 const FONTS = "uwuHere-fonts";
@@ -99,6 +99,7 @@ const PRECACHE = [
   "/js/p2p.js",
   "/js/qr.js",
   "/js/password.js",
+  "/js/colour-picker.js",
   // The Android app's side. Every page imports them through shell.js, and
   // in a browser they do nothing.
   "/js/app-bridge.js",

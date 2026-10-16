@@ -87,6 +87,7 @@ js/join.js           the attendee page
 js/api.js            fetch wrapper for /api, offline as an ordinary answer
 js/store.js          everything kept in localStorage, under "uwuhere."
 js/password.js       the live password checklist, mirrors api/_lib/password.js
+js/colour-picker.js  the button colour's wheel, brightness and hex code box
 js/geo.js            one Geolocation reading, with sentences for failures
 js/qr.js             QR encoder, so the code works offline (from uwuPromptr)
 js/icons.js, ui.js   inline SVG icons; modals, toasts, small helpers
