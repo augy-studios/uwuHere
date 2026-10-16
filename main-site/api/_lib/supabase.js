@@ -9,7 +9,7 @@
    PostgREST filter expression. */
 
 const URL_BASE = (process.env.SUPABASE_URL || "").replace(/\/$/, "");
-const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
+const SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY || "";
 
 export function hasSupabase() {
   return Boolean(URL_BASE && SERVICE_KEY);

@@ -115,7 +115,7 @@ fixed slug the pages branch on. Shared code is in `api/_lib/`.
 ## Environment
 
 Five variables, all server side, documented in `.env.example`:
-`SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `UWUHERE_HOST_SECRET`,
+`SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `UWUHERE_HOST_SECRET`,
 `UWUHERE_PASSWORD_PEPPER`, `CRON_SECRET`. Generate the three secrets with
 `openssl rand -hex 32`, and never change the host secret or the pepper once
 events exist.
