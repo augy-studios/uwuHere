@@ -24,7 +24,7 @@
  *
  * Not exported (AndroidManifest.xml): only this app opens it.
  */
-package org.uwuapps.uwuhere;
+package org.uwuapps.here;
 
 import android.app.Activity;
 import android.app.PendingIntent;
@@ -73,9 +73,9 @@ public class UpdateActivity extends Activity {
     private static final String RELEASES =
             "https://github.com/augy-studios/uwuHere/releases/download/";
     // Only checking, so ask before downloading what it finds.
-    private static final String EXTRA_CHECK = "org.uwuapps.uwuhere.update.CHECK";
+    private static final String EXTRA_CHECK = "org.uwuapps.here.update.CHECK";
     // The version a notification said is out, to look it up past the site's cache.
-    private static final String EXTRA_VERSION = "org.uwuapps.uwuhere.update.VERSION";
+    private static final String EXTRA_VERSION = "org.uwuapps.here.update.VERSION";
 
     // The window on screen, for InstallStatus to report back to.
     private static WeakReference<UpdateActivity> sShowing = new WeakReference<>(null);

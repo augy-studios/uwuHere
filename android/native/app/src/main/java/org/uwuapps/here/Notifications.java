@@ -10,7 +10,7 @@
  * and the pushes name these channels (main-site/api/_lib/fcm.js). Android only takes a channel's
  * sound and importance from when it's made, so changing one means a new id.
  */
-package org.uwuapps.uwuhere;
+package org.uwuapps.here;
 
 import android.app.NotificationChannel;
 import android.app.NotificationManager;

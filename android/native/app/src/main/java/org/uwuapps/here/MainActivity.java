@@ -12,7 +12,7 @@
  * uwu://here/ link, or a tapped notification) opened in the page, the back button going back
  * through the page's history, and the notification channels.
  */
-package org.uwuapps.uwuhere;
+package org.uwuapps.here;
 
 import android.content.Intent;
 import android.net.Uri;

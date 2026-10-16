@@ -1,6 +1,6 @@
 # uwuHere for Android
 
-The Android app, `org.uwuapps.uwuhere`: the web app at here.uwuapps.org in
+The Android app, `org.uwuapps.here`: the web app at here.uwuapps.org in
 [Capacitor](https://capacitorjs.com)'s WebView (`capacitor.config.json`, `server.url`). The
 site's own updates reach it at once, so the app only needs building again for its native parts.
 Those are the things a web page can't do, which the page reaches through Capacitor's bridge
@@ -11,7 +11,7 @@ itself from there.
 
 ## What it adds to the site
 
-| Feature | Native side (`native/app/src/main/java/org/uwuapps/uwuhere/`) | Site side (`main-site/`) |
+| Feature | Native side (`native/app/src/main/java/org/uwuapps/here/`) | Site side (`main-site/`) |
 |---|---|---|
 | **The host's screen stays on** while same-wifi check-in is ready. In Chrome the page uses the Screen Wake Lock API, which Android's WebView doesn't have | `HerePlugin.keepAwake` | `js/host.js` (`updateWakeLock`) |
 | **The big QR code at full brightness** while it's up, so the back of a room can scan it. Only the app's window: the phone's own setting is untouched | `HerePlugin.brightness` | `js/host.js` (`showQr`, `uwu:modalclose`) |
@@ -129,7 +129,7 @@ APK:
 
 1. Sign up on the [Android Developer Console](https://developer.android.com/developer-verification/guides/android-developer-console),
    or use the account you made for SG Bus Timings.
-2. Register the package `org.uwuapps.uwuhere` with the SHA-256 fingerprint in
+2. Register the package `org.uwuapps.here` with the SHA-256 fingerprint in
    `assetlinks.json`.
 
 Check [Google's guide](https://developer.android.com/developer-verification/guides) for the

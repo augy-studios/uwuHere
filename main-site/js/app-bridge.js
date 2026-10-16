@@ -2,7 +2,7 @@
 // what the app can do for the page that a web page can't do for itself. The
 // app is Capacitor: the site runs in its own WebView, which injects
 // window.Capacitor before the page's scripts, and calls go straight to its
-// plugin (android/native/app/src/main/java/org/uwuapps/uwuhere/HerePlugin.java).
+// plugin (android/native/app/src/main/java/org/uwuapps/here/HerePlugin.java).
 //
 // In a browser or the PWA there's no window.Capacitor, and the page carries on
 // as a website with everything it already has.

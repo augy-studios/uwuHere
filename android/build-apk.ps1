@@ -20,7 +20,7 @@
 $ErrorActionPreference = 'Stop'
 $here = $PSScriptRoot
 $root = Split-Path $here -Parent
-$package = 'org.uwuapps.uwuhere'
+$package = 'org.uwuapps.here'
 $assetLinks = "$root\main-site\.well-known\assetlinks.json"
 
 function Find-Jdk {

@@ -22,7 +22,7 @@
  *   openSettings({ what })    the app's notification settings ("notifications") or its page in
  *                             Android's settings ("app"), for location or notifications refused
  */
-package org.uwuapps.uwuhere;
+package org.uwuapps.here;
 
 import android.app.Activity;
 import android.content.ActivityNotFoundException;

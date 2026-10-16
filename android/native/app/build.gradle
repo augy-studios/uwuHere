@@ -1,10 +1,10 @@
 apply plugin: 'com.android.application'
 
 android {
-    namespace = "org.uwuapps.uwuhere"
+    namespace = "org.uwuapps.here"
     compileSdk = rootProject.ext.compileSdkVersion
     defaultConfig {
-        applicationId "org.uwuapps.uwuhere"
+        applicationId "org.uwuapps.here"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         // Raise both for a new version: a phone only takes a higher versionCode as an update.

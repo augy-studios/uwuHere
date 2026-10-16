@@ -38,7 +38,7 @@ nothing is ever sent; without the third, check-ins and news still arrive, but no
 1. Open <https://console.firebase.google.com> and pick the **UwU Apps** project.
 2. Click the gear by **Project Overview**, then **Project settings** > **Your apps** > **Add
    app** > **Android**.
-3. **Android package name**: `org.uwuapps.uwuhere`. It has to be exactly this.
+3. **Android package name**: `org.uwuapps.here`. It has to be exactly this.
 4. **App nickname**: `uwuHere`. Leave **Debug signing certificate SHA-1** empty, since FCM
    doesn't need it.
 5. Click **Register app**.
@@ -48,7 +48,7 @@ nothing is ever sent; without the third, check-ins and news still arrive, but no
    has what they describe: the build applies the Google services plugin whenever the file is
    there.
 
-The file lists every app in the project, and the build takes the `org.uwuapps.uwuhere` entry
+The file lists every app in the project, and the build takes the `org.uwuapps.here` entry
 from it. Download it **after** registering uwuHere, or the build stops with "No matching client
 found for package name".
 
@@ -158,7 +158,7 @@ Sending news later works the same way as step 3: **Topic** `uwuhere-news`, chann
 
 | What happens | What to do |
 |---|---|
-| The build stops with `No matching client found for package name 'org.uwuapps.uwuhere'` | `google-services.json` was downloaded before uwuHere was added. Download it again from **Project settings** > **Your apps** > **uwuHere**. |
+| The build stops with `No matching client found for package name 'org.uwuapps.here'` | `google-services.json` was downloaded before uwuHere was added. Download it again from **Project settings** > **Your apps** > **uwuHere**. |
 | No bell in the Edge Tray | The APK was built without `google-services.json`. Check it's at `android\native\app\google-services.json`, then build again and reinstall. |
 | "Notifications are off for uwuHere in Android's settings" | You said no to Android's prompt. Tap **Open Android's settings** under the switches, turn notifications on, and come back. |
 | "Couldn't reach Firebase" when turning a switch on | The phone was offline, or has no Google Play services (some Huawei phones), which FCM needs. |

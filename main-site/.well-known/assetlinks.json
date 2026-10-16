@@ -1,8 +1,8 @@
 [{
-      "relation": ["delegate_permission/common.handle_all_urls"],
-      "target": {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
         "namespace": "android_app",
-        "package_name": "org.uwuapps.uwuhere",
-        "sha256_cert_fingerprints": ["E4:EB:13:B6:CA:2A:9E:89:E4:8B:3C:AB:68:2B:BF:6A:99:97:09:A5:2A:9A:36:20:8C:8C:A9:94:9B:08:CB:51"]
-      }
-    }]
+        "package_name": "org.uwuapps.here",
+        "sha256_cert_fingerprints": ["EE:0D:A7:D3:D5:30:80:EA:DD:08:41:3D:30:4E:35:E0:11:28:D0:68:55:19:69:8E:6F:F3:ED:31:8D:54:85:7A"]
+    }
+}]
