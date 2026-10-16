@@ -112,6 +112,22 @@
             <p class="banner error" id="joinError" hidden></p>
         </section>
 
+        <!-- Always shown: the list is only this browser's events, and the code
+             form is the way back in from another device (host.html asks for
+             the password there). -->
+        <section class="glass card" id="hostedCard" aria-labelledby="hostedTitle">
+            <h2 id="hostedTitle">Your events</h2>
+            <ul class="hosted-list" id="hostedList" hidden></ul>
+            <form class="inline-form" id="openForm" novalidate>
+                <input class="code-input" id="openCode" type="text" inputmode="text" autocomplete="off"
+                    autocapitalize="characters" spellcheck="false" maxlength="7" placeholder="CODE"
+                    aria-label="Code of an event you host" aria-describedby="openHint">
+                <button class="btn" type="submit"><span data-icon="lock"></span>Open</button>
+            </form>
+            <span class="hint" id="openHint">Hosting from another device? Enter the code to open its host page.</span>
+            <p class="banner error" id="openError" hidden></p>
+        </section>
+
         <section class="glass card" aria-labelledby="createTitle">
             <h2 id="createTitle">Host an event</h2>
             <form id="createForm" class="stack" novalidate>
@@ -177,11 +193,6 @@
                     <span data-icon="plus"></span>Create event
                 </button>
             </form>
-        </section>
-
-        <section class="glass card" id="hostedCard" aria-labelledby="hostedTitle" hidden>
-            <h2 id="hostedTitle">Your events</h2>
-            <ul class="hosted-list" id="hostedList"></ul>
         </section>
     </main>
 

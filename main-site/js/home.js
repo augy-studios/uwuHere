@@ -13,25 +13,32 @@ bootShell();
 
 const $ = (id) => document.getElementById(id);
 
-/* ---- join ---- */
+/* ---- join, and open an event you host ---- */
 
-$("joinCode").addEventListener("input", (e) => {
-  const caret = e.target.selectionStart;
-  e.target.value = e.target.value.toUpperCase();
-  e.target.setSelectionRange(caret, caret);
-  $("joinError").hidden = true;
-});
+// A code box that goes to `page`?id=CODE. Used to join as an attendee, and to
+// reach the host page from a device that did not make the event.
+function codeForm(formId, inputId, errorId, page) {
+  $(inputId).addEventListener("input", (e) => {
+    const caret = e.target.selectionStart;
+    e.target.value = e.target.value.toUpperCase();
+    e.target.setSelectionRange(caret, caret);
+    $(errorId).hidden = true;
+  });
 
-$("joinForm").addEventListener("submit", (e) => {
-  e.preventDefault();
-  const code = normaliseCode($("joinCode").value);
-  if (!isValidCode(code)) {
-    $("joinError").textContent = "An event code is 6 letters and numbers, like BCD234.";
-    $("joinError").hidden = false;
-    return;
-  }
-  location.href = `/join?id=${code}`;
-});
+  $(formId).addEventListener("submit", (e) => {
+    e.preventDefault();
+    const code = normaliseCode($(inputId).value);
+    if (!isValidCode(code)) {
+      $(errorId).textContent = "An event code is 6 letters and numbers, like BCD234.";
+      $(errorId).hidden = false;
+      return;
+    }
+    location.href = `${page}?id=${code}`;
+  });
+}
+
+codeForm("joinForm", "joinCode", "joinError", "/join");
+codeForm("openForm", "openCode", "openError", "/host");
 
 /* ---- create ---- */
 
@@ -159,7 +166,7 @@ $("createForm").addEventListener("submit", async (e) => {
 
 function renderHosted() {
   const events = listHosted();
-  $("hostedCard").hidden = events.length === 0;
+  $("hostedList").hidden = events.length === 0;
 
   $("hostedList").innerHTML = events
     .map(

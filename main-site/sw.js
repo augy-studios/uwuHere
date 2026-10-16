@@ -49,7 +49,7 @@
 // the whole install. `node check-precache.js` keeps the list honest.
 //
 // VERSION is a plain integer, counting up by one.
-const VERSION = 2;
+const VERSION = 3;
 
 const SHELL = `uwuHere-shell-${VERSION}`;
 const FONTS = "uwuHere-fonts";
