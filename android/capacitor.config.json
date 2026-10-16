@@ -12,7 +12,8 @@
   },
   "plugins": {
     "SystemBars": {
-      "insetsHandling": "css"
+      "insetsHandling": "css",
+      "initialViewportFitValueHint": "cover"
     },
     "PushNotifications": {
       "presentationOptions": ["alert", "sound"]
