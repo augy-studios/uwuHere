@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The home screen widgets in dark mode: the site's dark page colours. -->
+<resources>
+    <color name="widget_background">#18201B</color>
+    <color name="widget_button">#26302A</color>
+    <color name="widget_ink">#EEF2EF</color>
+    <color name="widget_muted">#9AA7A0</color>
+    <color name="widget_brand_ink">#BFF5CF</color>
+</resources>

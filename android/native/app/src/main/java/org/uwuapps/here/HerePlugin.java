@@ -46,6 +46,11 @@
  *                             message }, reason one of "denied", "bt-off", "location-off",
  *                             "not-found", "refused", "unsupported", "failed", "timeout",
  *                             "dropped", "busy"
+ *   widget({ code, hostKey, title, paused, ended, count, left, latestName, latestAt })  the
+ *                             event this phone hosts, as the host page just had it from the
+ *                             server, for the "Your event" home screen widget (WidgetData), which
+ *                             refreshes it itself from then on. { code, clear: true } once the
+ *                             page no longer has it
  */
 package org.uwuapps.here;
 
@@ -126,8 +131,8 @@ public class HerePlugin extends Plugin {
     private static final Pattern HOST_TOPIC = Pattern.compile("uwuhere-host-[0-9a-f]{40}");
     private static final String PREFS = "uwuhere";
     private static final String HOST_TOPICS = "host.topics";
-    private static final Pattern EVENT_CODE = Pattern.compile("[BCDFGHJKLMNPQRSTVWXYZ2-9]{6}");
-    private static final Pattern HOST_KEY = Pattern.compile("[A-Za-z0-9_-]{43}");
+    static final Pattern EVENT_CODE = Pattern.compile("[BCDFGHJKLMNPQRSTVWXYZ2-9]{6}");
+    static final Pattern HOST_KEY = Pattern.compile("[A-Za-z0-9_-]{43}");
 
     private Hotspot hotspot;
     private Mesh mesh;
@@ -179,6 +184,7 @@ public class HerePlugin extends Plugin {
         features.put("tap"); // TapService; tap() says if this phone has no NFC
         if (Hotspot.supported()) features.put("hotspot"); // Hotspot, Android 8 and later
         if (mesh != null) features.put("mesh"); // Mesh: Bluetooth, app to app, with Play services
+        features.put("widget"); // EventWidget, fed by widget()
         // Firebase is set up for this build (google-services.json): notifications can come.
         if (firebaseReady()) features.put("push");
         out.put("features", features);
@@ -725,6 +731,46 @@ public class HerePlugin extends Plugin {
     protected void handleOnPause() {
         if (TapService.active()) preferTapService(false);
         super.handleOnPause();
+    }
+
+    /* ---- the "Your event" home screen widget (EventWidget, WidgetData) ---- */
+
+    @PluginMethod
+    public void widget(PluginCall call) {
+        String code = call.getString("code", "");
+        if (!EVENT_CODE.matcher(code).matches()) {
+            call.reject("Not an event this phone hosts");
+            return;
+        }
+        if (Boolean.TRUE.equals(call.getBoolean("clear", false))) {
+            WidgetData.clear(getContext(), code);
+            call.resolve();
+            return;
+        }
+        String hostKey = call.getString("hostKey", "");
+        if (!HOST_KEY.matcher(hostKey).matches()) {
+            call.reject("Not an event this phone hosts");
+            return;
+        }
+        WidgetData.Event e = new WidgetData.Event();
+        e.code = code;
+        e.hostKey = hostKey;
+        // The server's own limits (main-site/api/_lib/validate.js), so nothing longer is drawn.
+        e.title = clip(call.getString("title", ""), 80);
+        e.paused = Boolean.TRUE.equals(call.getBoolean("paused", false));
+        e.ended = Boolean.TRUE.equals(call.getBoolean("ended", false));
+        e.count = Math.max(0, call.getInt("count", 0));
+        e.left = Math.max(0, call.getInt("left", 0));
+        String latest = call.getString("latestName");
+        e.latestName = latest == null || latest.isEmpty() ? null : clip(latest, 60);
+        e.latestAt = WidgetData.parseTime(call.getString("latestAt"));
+        WidgetData.fromPage(getContext(), e);
+        call.resolve();
+    }
+
+    private static String clip(String text, int max) {
+        if (text == null) return "";
+        return text.codePointCount(0, text.length()) <= max ? text : text.substring(0, text.offsetByCodePoints(0, max));
     }
 
     @PluginMethod

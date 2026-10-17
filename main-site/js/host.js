@@ -13,10 +13,11 @@
 // In the Android app (js/app-bridge.js) a few things go through the app
 // instead: the screen kept on (the WebView has no Screen Wake Lock), the big
 // QR code at full brightness, the CSV saved to Downloads (the WebView cannot
-// download a file the page made), and this event's check-in notifications
-// (js/app-notify.js). Tapping phones only works there: the app makes this
-// phone an NFC tag that hands each phone touching it a one-time link
-// (TapService.java, api/_lib/tap.js). So does checking in with no internet:
+// download a file the page made), this event's check-in notifications
+// (js/app-notify.js), and the home screen widget (js/app-widget.js). Tapping
+// phones only works there: the app makes this phone an NFC tag that hands each
+// phone touching it a one-time link (TapService.java, api/_lib/tap.js). So
+// does checking in with no internet:
 // the app makes this phone a wifi hotspot serving a check-in page of its own
 // (Hotspot.java), and its check-ins come here to be recorded like same-wifi
 // ones. And so does Bluetooth: attendees who have the app check in phone to
@@ -26,6 +27,7 @@ import { bootShell } from "./shell.js";
 import { postJson } from "./api.js";
 import { AppBridge } from "./app-bridge.js";
 import { watchHostAlerts } from "./app-notify.js";
+import { tellWidget, forgetWidget } from "./app-widget.js";
 import { Host, normaliseCode, isValidCode, PROTOCOL_VERSION } from "./p2p.js";
 import { qrToSvg } from "./qr.js";
 import { getPosition } from "./geo.js";
@@ -127,6 +129,8 @@ function applySnapshot(snapshot, { fromCache = false } = {}) {
     // Check-ins by location reach this phone while the app is closed, until
     // the event ends.
     watchHostAlerts(hostKey, !event.ended);
+    // The app's home screen widget, which carries on from here by itself.
+    tellWidget(code, hostKey, event, attendees);
   }
   render();
   syncP2p();
@@ -147,6 +151,7 @@ function upsertAttendee(attendee) {
 
 function loseAccess() {
   watchHostAlerts(hostKey, false);
+  forgetWidget(code);
   hostKey = null;
   store.forgetHosted(code);
   stopP2p();
@@ -157,6 +162,7 @@ function loseAccess() {
 
 function eventGone() {
   watchHostAlerts(hostKey, false);
+  forgetWidget(code);
   store.forgetHosted(code);
   stopP2p();
   event = null;

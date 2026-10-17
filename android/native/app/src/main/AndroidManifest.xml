@@ -123,5 +123,28 @@
             <meta-data android:name="android.nfc.cardemulation.host_apdu_service"
                 android:resource="@xml/tap_service" />
         </service>
+
+        <!-- Home screen widgets. "Your event" (EventWidget.java): the event this phone hosts, and
+             how many are here, refreshed by WidgetWorker while it's on, which needs no permission
+             of its own. "Check in" (ShortcutWidget.java): buttons into the home page. Not
+             exported: only Android's widget service, as the system, and this app send to them. -->
+        <receiver android:name=".EventWidget"
+            android:exported="false"
+            android:label="@string/widget_event_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider"
+                android:resource="@xml/widget_event" />
+        </receiver>
+        <receiver android:name=".ShortcutWidget"
+            android:exported="false"
+            android:label="@string/widget_shortcut_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider"
+                android:resource="@xml/widget_shortcut" />
+        </receiver>
     </application>
 </manifest>

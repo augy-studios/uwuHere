@@ -6,6 +6,7 @@ import { postJson } from "./api.js";
 import { getPosition } from "./geo.js";
 import { normaliseCode, isValidCode } from "./p2p.js";
 import { saveHosted, saveHostCache, listHosted, forgetHosted } from "./store.js";
+import { forgetWidget } from "./app-widget.js";
 import { checkPassword, renderPasswordChecks } from "./password.js";
 import { escapeHtml, formatDateTime, charCount, paintHereButton, hydrateIcons, armed } from "./ui.js";
 
@@ -206,7 +207,25 @@ $("hostedList").addEventListener("click", (e) => {
   const btn = e.target.closest("[data-forget]");
   if (!btn || !armed(btn, "Forget?")) return;
   forgetHosted(btn.dataset.forget);
+  forgetWidget(btn.dataset.forget);
   renderHosted();
 });
 
 renderHosted();
+
+/* ---- straight to a box: /#join and /#host ---- */
+
+// The Android app's widgets open these (ShortcutWidget.java, and "Your event"
+// with no event yet). The hash is taken off once used, so the same link
+// opened again while this page is up is a hashchange again.
+function jumpToHash() {
+  const id = { "#join": "joinCode", "#host": "title" }[location.hash];
+  if (!id) return;
+  history.replaceState(null, "", location.pathname + location.search);
+  const input = $(id);
+  input.closest("section").scrollIntoView({ block: "start" });
+  input.focus({ preventScroll: true });
+}
+
+window.addEventListener("hashchange", jumpToHash);
+jumpToHash();

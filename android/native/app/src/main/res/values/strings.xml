@@ -5,4 +5,9 @@
     <string name="package_name">org.uwuapps.here</string>
     <string name="custom_url_scheme">org.uwuapps.here</string>
     <string name="tap_service">uwuHere tap check-in</string>
+    <!-- The widget picker's names and descriptions (xml/widget_*.xml). -->
+    <string name="widget_event_label">Your event</string>
+    <string name="widget_event_description">How many are here at the event you\'re hosting, and who checked in last</string>
+    <string name="widget_shortcut_label">Check in</string>
+    <string name="widget_shortcut_description">Check in with a code, or host an event</string>
 </resources>

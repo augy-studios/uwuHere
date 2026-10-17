@@ -49,7 +49,7 @@
 // the whole install. `node check-precache.js` keeps the list honest.
 //
 // VERSION is a plain integer, counting up by one.
-const VERSION = 10;
+const VERSION = 11;
 
 const SHELL = `uwuHere-shell-${VERSION}`;
 const FONTS = "uwuHere-fonts";
@@ -105,6 +105,7 @@ const PRECACHE = [
   "/js/app-bridge.js",
   "/js/app-update.js",
   "/js/app-notify.js",
+  "/js/app-widget.js",
 
   // The icons the interface itself uses, and the manifest.
   "/HAT-192.png",

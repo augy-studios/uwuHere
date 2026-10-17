@@ -9,8 +9,8 @@ android {
         targetSdkVersion rootProject.ext.targetSdkVersion
         // Raise both for a new version: a phone only takes a higher versionCode as an update.
         // build-apk.ps1 names the release folder after versionName.
-        versionCode 2
-        versionName "1.0.1"
+        versionCode 3
+        versionName "1.0.2"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
              // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
@@ -57,6 +57,8 @@ dependencies {
     implementation "com.google.firebase:firebase-messaging:$firebaseMessagingVersion"
     // Not Capacitor's: Bluetooth check-in from app to app (Mesh).
     implementation "com.google.android.gms:play-services-nearby:$playServicesNearbyVersion"
+    // Not Capacitor's: the "Your event" widget's refresh while the app is closed (WidgetWorker).
+    implementation "androidx.work:work-runtime:$androidxWorkVersion"
     implementation project(':capacitor-cordova-android-plugins')
 }
 

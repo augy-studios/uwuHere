@@ -23,6 +23,7 @@ itself from there.
 | **Tapping phones**: the host's phone answers as an NFC tag, handing each phone that touches it the join link with a one-time token, so attendees check in with no app, in their browser. A "Phone tapped" note on the host page each time | `TapService`, `HerePlugin.tap` | `js/host.js`, `js/join.js`, `api/_lib/tap.js` |
 | **Bluetooth check-in, app to app**: an attendee who has the app checks in phone to phone with the host's, over Google's Nearby Connections, with no internet needed on either | `Mesh`, `HerePlugin.bluetooth`, `HerePlugin.meshCheckIn` | `js/host.js`, `js/join.js` |
 | **Checking in with no internet**: the host's phone becomes a wifi hotspot serving a check-in page of its own, for attendees with no signal, iPhones included. Two QR codes on the host page: join the wifi, open the page. See `OFFLINE-CHECKIN.md` | `Hotspot`, `LocalServer`, `res/raw/hotspot_page.html`, `HerePlugin.hotspot` | `js/host.js` |
+| **Home screen widgets**. "Your event": the event this phone is hosting, with how many are here, how many left early, who checked in last and its code; tapping it opens the host page. It refreshes from its own button and every 15 minutes while the event is on, with the app closed. "Check in": two buttons, **Check in** (the home page's code box) and **Host** (its new event form) | `EventWidget`, `WidgetData`, `WidgetWorker`, `ShortcutWidget`, `HerePlugin.widget` | `js/app-widget.js`, `js/host.js`, `js/home.js` (`/#join`, `/#host`) |
 | **No status bar**, so the page has the whole screen; a swipe down from the top shows it for a moment, its icons following the page's light or dark mode, not the phone's. The user agent's `uwuHereApp/2` tells the page there's no bar to leave room for (1.0.0, `uwuHereApp/1`, still has it) | `MainActivity`, Capacitor's SystemBars | `js/app-bridge.js`, `css/app.css` (`data-statusbar`) |
 
 The website and PWA lose nothing: everything a browser can do stays as it was, and these only
@@ -33,7 +34,9 @@ Things the app deliberately doesn't do:
 
 - **Keep running in the background.** Same-wifi check-in needs the host's page open, as on the
   web; the app keeps the screen on rather than starting a background service, which Android
-  would show as a permanent notification and may still stop.
+  would show as a permanent notification and may still stop. The one exception is the "Your
+  event" widget's refresh: a short WorkManager job every 15 minutes, only while that widget is on
+  the home screen and its event hasn't ended, and only with a connection.
 - **Scan QR codes itself.** The phone's camera already does, and the site's links open in the
   app, so it needs no camera permission.
 - **Background location.** Location is read once, when someone presses the button.
@@ -54,7 +57,11 @@ Things the app deliberately doesn't do:
 | Internet | Not asked: Android grants it | The site itself |
 
 Keeping the screen on and the QR code's brightness need no permission, and neither does saving
-to Downloads on Android 10 and later.
+to Downloads on Android 10 and later, or the widgets.
+
+The "Your event" widget keeps the event's host key in the app's own storage, as the page keeps it
+in the WebView's, so it can ask the server for the list. It shows the name of whoever checked in
+last on the home screen; a host who'd rather not can leave the widget off.
 
 If the app ever goes on Google Play, that build has to drop `UpdateActivity` and
 `REQUEST_INSTALL_PACKAGES`, since Play updates apps itself.
@@ -102,8 +109,8 @@ Android SDK (`ANDROID_HOME`, the one Bubblewrap left in `~/.bubblewrap`, or Andr
 **For a new version**, raise both of these in `native/app/build.gradle` first:
 
 ```groovy
-versionCode 2          // a whole number, one higher each release: phones only update to a higher one
-versionName "1.0.1"    // what people see, and the release folder's name
+versionCode 3          // a whole number, one higher each release: phones only update to a higher one
+versionName "1.0.2"    // what people see, and the release folder's name
 ```
 
 If `release/<version>/` already has an APK, the script warns and replaces it.
@@ -164,6 +171,13 @@ On a phone with the app installed:
 - **Location**: check in by location. Android asks for location once; refuse it, and the page
   says to allow it in Android's settings.
 - **Updates**: the Edge Tray's circled download button says you have the newest version.
+- **Widgets**: add "Your event" before hosting anything: "No event yet", and a tap opens the
+  home page at "Host an event". Open an event's host page: the widget shows it within a second.
+  Check in by location from another phone, then tap the widget's refresh button: "Refreshing…",
+  then one more here. End the event: "Ended". In airplane mode, refresh says "Offline, as of …".
+  Shrink it to one row high: the detail line goes, then the code. "Check in": **Check in** opens
+  the code box, **Host** the new event form, both from the app closed and from another page in
+  it. Switch the phone to dark mode: both widgets follow.
 - **Notifications** (with Firebase set up): turn on "Check-ins to my events", close the app, and
   check in by location from another phone. "Name checked in by location" arrives within
   seconds.

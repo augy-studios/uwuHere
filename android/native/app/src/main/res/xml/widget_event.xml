@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The "Your event" widget (EventWidget.java). updatePeriodMillis is 0: WidgetWorker refreshes it,
+     and only while its event is on. The target cells, preview layout and description are
+     Android 12 and later; before, the picker shows the app's icon. -->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:description="@string/widget_event_description"
+    android:initialLayout="@layout/widget_event"
+    android:minWidth="180dp"
+    android:minHeight="110dp"
+    android:minResizeWidth="110dp"
+    android:minResizeHeight="60dp"
+    android:previewLayout="@layout/widget_event"
+    android:resizeMode="horizontal|vertical"
+    android:targetCellWidth="3"
+    android:targetCellHeight="2"
+    android:updatePeriodMillis="0"
+    android:widgetCategory="home_screen" />

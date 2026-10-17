@@ -122,6 +122,7 @@ js/app-bridge.js     the channel to the Android app (../android), when open in i
                      says which app builds hide the status bar
 js/app-update.js     the app's own update check, and the tray's "Check for updates"
 js/app-notify.js     the app's notifications bell, and each event's check-in alerts
+js/app-widget.js     the app's "Your event" home screen widget, told what the host page has
 sw.js                service worker: caches the shell, waits to update
 check-precache.js    checks sw.js's list against what is on disk
 api/                 Vercel functions, see below

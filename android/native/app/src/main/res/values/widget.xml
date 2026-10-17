@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The home screen widgets (EventWidget.java, ShortcutWidget.java), in the site's colours
+     (main-site/css/theme.css): ink, muted and brand ink on a light card. Dark in
+     values-night/widget.xml. Widgets follow the phone's mode, not the site's. -->
+<resources>
+    <color name="widget_background">#F7FAF8</color>
+    <color name="widget_button">#E4EBE7</color>
+    <color name="widget_ink">#121815</color>
+    <color name="widget_muted">#5B665F</color>
+    <color name="widget_brand_ink">#1F6B3D</color>
+    <!-- The brand green, with the site's on-brand text on it in both modes. -->
+    <color name="widget_brand">#CCFFCC</color>
+    <color name="widget_on_brand">#121815</color>
+
+    <dimen name="widget_radius">16dp</dimen>
+    <dimen name="widget_button_radius">12dp</dimen>
+</resources>

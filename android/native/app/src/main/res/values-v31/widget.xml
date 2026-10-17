@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 12 and later: the widgets' corners as round as the launcher draws everyone's. -->
+<resources>
+    <dimen name="widget_radius">@android:dimen/system_app_widget_background_radius</dimen>
+    <dimen name="widget_button_radius">@android:dimen/system_app_widget_inner_radius</dimen>
+</resources>
