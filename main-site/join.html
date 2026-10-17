@@ -146,6 +146,11 @@
             </div>
             <p class="here-status" id="hereStatus" role="status" aria-live="polite"></p>
 
+            <!-- Chrome on Android: read the tap in this page (js/join.js, Web NFC). -->
+            <button class="btn nfc-btn" id="nfcBtn" type="button" hidden>
+                <span data-icon="tap"></span>Tap phones to check in
+            </button>
+
             <button class="btn leave-btn" id="leaveBtn" type="button" aria-haspopup="dialog">
                 <span data-icon="door"></span><span id="leaveText">I'm leaving early</span>
             </button>

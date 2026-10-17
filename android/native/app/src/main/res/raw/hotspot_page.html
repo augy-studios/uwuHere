@@ -1,0 +1,167 @@
+<!doctype html>
+<!-- The check-in page the host's phone serves on its own hotspot (Hotspot.java), for attendees
+     with no internet. Plain http on the phone's address, so everything is in this one file:
+     nothing can be fetched from anywhere else. __EVENT__ is replaced with the event's details
+     as JSON. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Check in | uwuHere</title>
+<style>
+  :root {
+    --bg: #f7f7f5; --card: #ffffff; --ink: #1d1d1b; --muted: #66665f; --line: #deded8;
+    --ok: #237a3b; --error: #b3261e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #151514; --card: #222220; --ink: #f1f1ec; --muted: #a9a9a1; --line: #3a3a36; --ok: #6fcf8a; --error: #ff8a80; }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; background: var(--bg); color: var(--ink);
+    font: 16px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    display: flex; justify-content: center;
+  }
+  main { width: 100%; max-width: 440px; padding: 24px 16px 40px; display: flex; flex-direction: column; gap: 16px; }
+  .brand { color: var(--muted); font-size: 0.9rem; }
+  h1 { margin: 0; font-size: 1.4rem; font-weight: 500; overflow-wrap: anywhere; }
+  .code { margin: 2px 0 0; color: var(--muted); font-size: 0.9rem; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+  label { display: flex; flex-direction: column; gap: 6px; font-size: 0.9rem; color: var(--muted); }
+  input {
+    font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line);
+    border-radius: 12px; padding: 12px; width: 100%;
+  }
+  .here {
+    align-self: center; width: min(64vw, 240px); aspect-ratio: 1; border-radius: 50%; border: none;
+    font: inherit; font-size: 1.5rem; font-weight: 600; cursor: pointer; padding: 16px;
+    box-shadow: 0 8px 24px rgb(0 0 0 / 0.18);
+  }
+  .here[aria-disabled="true"] { cursor: default; opacity: 0.85; }
+  .status { text-align: center; min-height: 1.4em; margin: 0; }
+  .status.ok { color: var(--ok); }
+  .status.error { color: var(--error); }
+  .note { text-align: center; color: var(--muted); font-size: 0.8rem; margin: 0; }
+</style>
+</head>
+<body>
+<main>
+  <div class="brand">uwuHere</div>
+  <div>
+    <h1 id="title">Check in</h1>
+    <p class="code" id="code"></p>
+  </div>
+
+  <div class="card" id="who">
+    <label>Your name
+      <input id="name" type="text" maxlength="60" autocomplete="name">
+    </label>
+    <label id="noteField" hidden><span id="noteLabel"></span>
+      <input id="note" type="text" maxlength="120" autocomplete="off">
+    </label>
+  </div>
+
+  <button class="here" id="here" type="button"></button>
+  <p class="status" id="status" role="status" aria-live="polite"></p>
+  <p class="note">You're on the host's phone's wifi, so you're here. It has no internet: your check-in reaches the host's list straight away, and uwuHere once they're back online.</p>
+</main>
+
+<script>
+  var EVENT = __EVENT__;
+  var $ = function (id) { return document.getElementById(id); };
+
+  // Storage can be refused; the page still works for this visit.
+  function get(key) { try { return localStorage.getItem(key); } catch (e) { return null; } }
+  function set(key, value) { try { localStorage.setItem(key, value); } catch (e) {} }
+
+  // A random id for this browser, so tapping twice is one check-in. crypto.randomUUID needs
+  // https; getRandomValues doesn't.
+  var memoryId = null;
+  function deviceId() {
+    var id = get("uwuhere.hotspot.device") || memoryId;
+    if (!/^[0-9a-f]{32}$/.test(id || "")) {
+      var bytes = new Uint8Array(16);
+      crypto.getRandomValues(bytes);
+      id = Array.prototype.map.call(bytes, function (b) { return ("0" + b.toString(16)).slice(-2); }).join("");
+      memoryId = id;
+      set("uwuhere.hotspot.device", id);
+    }
+    return id;
+  }
+
+  // Black or white, whichever reads better on the host's colour.
+  function inkFor(hex) {
+    var n = parseInt(String(hex).slice(1), 16);
+    var lin = function (c) { c /= 255; return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); };
+    var l = 0.2126 * lin((n >> 16) & 255) + 0.7152 * lin((n >> 8) & 255) + 0.0722 * lin(n & 255);
+    return l > 0.179 ? "#111111" : "#ffffff";
+  }
+
+  var doneKey = "uwuhere.hotspot.done." + EVENT.code;
+  var busy = false;
+
+  function status(text, tone) {
+    $("status").textContent = text;
+    $("status").className = "status" + (tone ? " " + tone : "");
+  }
+
+  function render() {
+    var done = get(doneKey);
+    $("who").hidden = Boolean(done);
+    $("here").textContent = done ? "You're here" : EVENT.buttonLabel;
+    $("here").setAttribute("aria-disabled", String(Boolean(done) || busy));
+    if (done) status("Checked in as " + done + ".", "ok");
+  }
+
+  $("title").textContent = EVENT.title || "Check in";
+  document.title = (EVENT.title || "Check in") + " | uwuHere";
+  $("code").textContent = "Event " + EVENT.code;
+  $("here").style.background = EVENT.buttonColor;
+  $("here").style.color = inkFor(EVENT.buttonColor);
+  if (EVENT.noteLabel) {
+    $("noteField").hidden = false;
+    $("noteLabel").textContent = EVENT.noteLabel;
+  }
+  $("name").value = get("uwuhere.hotspot.name") || "";
+  render();
+
+  $("here").addEventListener("click", function () {
+    if (busy || get(doneKey)) return;
+    var name = $("name").value.replace(/\s+/g, " ").trim();
+    var note = EVENT.noteLabel ? $("note").value.replace(/\s+/g, " ").trim() : "";
+    if (!name) { status("Type your name first.", "error"); $("name").focus(); return; }
+    set("uwuhere.hotspot.name", name);
+
+    busy = true;
+    render();
+    status("Checking you in.");
+    var controller = new AbortController();
+    var timer = setTimeout(function () { controller.abort(); }, 20000);
+
+    fetch("/checkin", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: name, note: note || null, device: deviceId() }),
+      signal: controller.signal
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (answer) {
+        if (answer.ok) {
+          set(doneKey, name);
+          status("You're checked in.", "ok");
+        } else {
+          status(answer.error || "The host's phone couldn't check you in. Try again.", "error");
+        }
+      })
+      .catch(function () {
+        status("Couldn't reach the host's phone. Check you're still on its wifi, then try again.", "error");
+      })
+      .then(function () {
+        clearTimeout(timer);
+        busy = false;
+        render();
+      });
+  });
+</script>
+</body>
+</html>

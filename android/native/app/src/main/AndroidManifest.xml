@@ -20,6 +20,22 @@
          Android's own install screen. Not allowed on Google Play: drop it for a Play build. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
+    <!-- Tapping phones: this phone answers as an NFC tag while a host page has it on
+         (TapService.java). Granted at install, never asked. A phone without NFC still installs
+         the app, and the host page says it can't take taps. -->
+    <uses-permission android:name="android.permission.NFC" />
+    <uses-feature android:name="android.hardware.nfc.hce" android:required="false" />
+
+    <!-- Checking in with no internet: this phone's own wifi hotspot, serving a check-in page
+         (Hotspot.java), started only when the host asks. "Nearby devices" on Android 13 and later,
+         asked then, and never used to find where anyone is; before 13, Android wants the location
+         permission above for it instead. -->
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+    <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES"
+        android:usesPermissionFlags="neverForLocation" />
+    <uses-feature android:name="android.hardware.wifi" android:required="false" />
+
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
@@ -81,5 +97,19 @@
             android:theme="@style/UpdateTheme" />
         <receiver android:name=".UpdateActivity$InstallStatus"
             android:exported="false" />
+
+        <!-- Tapping phones. Disabled until a host page turns it on (TapService.start), so the app
+             doesn't claim the NFC tag application when nobody is hosting. Exported for Android's
+             NFC service, the only caller BIND_NFC_SERVICE lets in. -->
+        <service android:name=".TapService"
+            android:enabled="false"
+            android:exported="true"
+            android:permission="android.permission.BIND_NFC_SERVICE">
+            <intent-filter>
+                <action android:name="android.nfc.cardemulation.action.HOST_APDU_SERVICE" />
+            </intent-filter>
+            <meta-data android:name="android.nfc.cardemulation.host_apdu_service"
+                android:resource="@xml/tap_service" />
+        </service>
     </application>
 </manifest>

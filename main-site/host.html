@@ -148,6 +148,16 @@
                             <span data-icon="refresh"></span>Retry
                         </button>
                     </div>
+                    <div class="status-row" id="tapRow" hidden>
+                        <span class="status-dot" id="tapDot"></span>
+                        <span id="tapText"></span>
+                        <button class="btn" id="tapAction" type="button" hidden></button>
+                    </div>
+                    <div class="status-row" id="hotspotRow" hidden>
+                        <span class="status-dot" id="hotspotDot" hidden></span>
+                        <span id="hotspotText"></span>
+                        <button class="btn" id="hotspotAction" type="button">Start</button>
+                    </div>
                     <div class="status-row" id="locRow" hidden>
                         <span data-icon="pin"></span>
                         <span id="locText"></span>
@@ -218,12 +228,15 @@
                 </label>
                 <div class="field">
                     <span class="field-head">How people prove they are here</span>
-                    <div class="toggle-grid" id="sMethods">
+                    <div class="toggle-grid three" id="sMethods">
                         <button class="toggle-btn" type="button" data-method="p2p" aria-pressed="false">
                             <span data-icon="wifi"></span>Same wifi
                         </button>
                         <button class="toggle-btn" type="button" data-method="location" aria-pressed="false">
                             <span data-icon="pin"></span>Location
+                        </button>
+                        <button class="toggle-btn" type="button" data-method="tap" aria-pressed="false">
+                            <span data-icon="tap"></span>Tap phones
                         </button>
                     </div>
                 </div>
@@ -273,6 +286,27 @@
             <div class="qr-holder present-qr" id="qrModalHolder"></div>
             <p class="present-code" id="qrModalCode"></p>
             <p class="share-link" id="qrModalLink"></p>
+        </div>
+    </div>
+
+    <!-- No internet: the app's hotspot, and its check-in page (js/host.js, Hotspot.java). -->
+    <div class="modal-backdrop hidden" id="hotspotModal">
+        <div class="modal glass present" role="dialog" aria-modal="true" aria-labelledby="hotspotModalTitle">
+            <div class="modal-head">
+                <h2 id="hotspotModalTitle">Check in without internet</h2>
+                <button class="icon-btn small" type="button" data-close-modal="hotspotModal" aria-label="Close">
+                    <span data-icon="close"></span>
+                </button>
+            </div>
+            <p class="modal-text">1. Scan to join this phone's wifi.</p>
+            <div class="qr-holder hotspot-qr" id="hotspotWifiQr"></div>
+            <p class="share-link" id="hotspotWifiText"></p>
+            <p class="modal-text">2. Then scan to check in.</p>
+            <div class="qr-holder hotspot-qr" id="hotspotPageQr"></div>
+            <p class="share-link" id="hotspotPageText"></p>
+            <p class="hint">Phones may say this wifi has no internet: stay connected. Check-ins land in the list here, and
+                reach uwuHere once this phone is back online. Keep this page open.</p>
+            <button class="btn btn-block" id="hotspotStop" type="button"><span data-icon="stop"></span>Stop the hotspot</button>
         </div>
     </div>
 

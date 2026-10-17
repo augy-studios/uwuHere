@@ -14,7 +14,12 @@
 // instead: the screen kept on (the WebView has no Screen Wake Lock), the big
 // QR code at full brightness, the CSV saved to Downloads (the WebView cannot
 // download a file the page made), and this event's check-in notifications
-// (js/app-notify.js).
+// (js/app-notify.js). Tapping phones only works there: the app makes this
+// phone an NFC tag that hands each phone touching it a one-time link
+// (TapService.java, api/_lib/tap.js). So does checking in with no internet:
+// the app makes this phone a wifi hotspot serving a check-in page of its own
+// (Hotspot.java), and its check-ins come here to be recorded like same-wifi
+// ones.
 
 import { bootShell } from "./shell.js";
 import { postJson } from "./api.js";
@@ -54,6 +59,13 @@ let p2p = { status: "idle", message: "" };
 let takenRetries = 0;
 let retryTimer = null;
 let wakeLock = null;
+
+// What the app last said about tapping phones: "idle", "ready", "nfc-off",
+// "unsupported" or "error".
+let tapState = "idle";
+let tapWanted = false;
+// Whether the app has said what it can do yet (AppBridge.ready, at boot).
+let bridgeHeard = !AppBridge.native;
 
 /* -------------------------------------------------------------------------
  * Views
@@ -112,6 +124,7 @@ function applySnapshot(snapshot, { fromCache = false } = {}) {
   }
   render();
   syncP2p();
+  syncTap();
 }
 
 function persist() {
@@ -130,6 +143,7 @@ function loseAccess() {
   hostKey = null;
   store.forgetHosted(code);
   stopP2p();
+  syncTap();
   showLocked("This browser can no longer manage this event. Enter its password to open it.");
 }
 
@@ -138,6 +152,7 @@ function eventGone() {
   store.forgetHosted(code);
   stopP2p();
   event = null;
+  syncTap();
   showMissing(
     "This event is gone",
     `Events are deleted ${store.PURGE_AFTER_END_DAYS} days after they end, or ${store.PURGE_UNENDED_DAYS} days after they were made if nobody ends them.`
@@ -229,6 +244,9 @@ const METHOD = {
   p2p: { icon: "wifi", label: "Same wifi" },
   location: { icon: "pin", label: "Location" },
   manual: { icon: "hand", label: "Added by hand" },
+  tap: { icon: "tap", label: "Tapped phones" },
+  tap_late: { icon: "tap", label: "Tapped, sent later" },
+  hotspot: { icon: "hotspot", label: "Host's hotspot" },
 };
 
 function joinLink() {
@@ -240,7 +258,7 @@ function displayList() {
     id: item.localId,
     name: item.payload.name,
     note: item.payload.note,
-    method: item.kind === "record" ? "p2p" : "manual",
+    method: item.kind === "record" ? item.payload.method || "p2p" : "manual",
     distance: null,
     checkedInAt: item.payload.at,
     leftEarlyAt: null,
@@ -274,6 +292,7 @@ function render() {
   }
 
   $("shareBlock").hidden = ended;
+  if (ended) stopHotspot();
   $("pauseBtn").hidden = ended;
   $("endBtn").hidden = ended;
   $("addForm").hidden = ended;
@@ -296,6 +315,8 @@ function render() {
   renderList();
   renderSync();
   renderP2p();
+  renderTap();
+  renderHotspot();
 }
 
 function renderList() {
@@ -488,15 +509,20 @@ async function onPeerMessage(message, from) {
   // bye, and any type a newer build might send: nothing to do.
   if (message.type !== "checkin") return;
 
-  const reply = (answer) => host?.send(answer, from);
-
   if (message.v !== PROTOCOL_VERSION) {
-    return reply({ type: "refused", reason: "version", message: "This page is out of date. Reload it and try again." });
+    host?.send({ type: "refused", reason: "version", message: "This page is out of date. Reload it and try again." }, from);
+    return;
   }
-  if (!event || event.ended) return reply({ type: "refused", reason: "ended", message: "This event has ended." });
-  if (event.paused) {
-    return reply({ type: "refused", reason: "paused", message: "The host has paused check-ins for now." });
-  }
+  host?.send(await takeCheckin(message, "p2p"), from);
+}
+
+// A check-in this page received, by same wifi ("p2p") or through the app's
+// hotspot ("hotspot"): to the server, or into the outbox if it can't be
+// reached. Answers { type: "checked-in", at } or { type: "refused", reason,
+// message }, the same-wifi protocol's own answers.
+async function takeCheckin(message, method) {
+  if (!event || event.ended) return { type: "refused", reason: "ended", message: "This event has ended." };
+  if (event.paused) return { type: "refused", reason: "paused", message: "The host has paused check-ins for now." };
 
   const deviceHash =
     typeof message.deviceHash === "string" && /^[0-9a-f]{64}$/.test(message.deviceHash) ? message.deviceHash : null;
@@ -504,39 +530,245 @@ async function onPeerMessage(message, from) {
   const note = event.noteLabel ? cleanLine(message.note, LIMITS.note) : "";
 
   if (!deviceHash || !name || note === null) {
-    return reply({ type: "refused", reason: "invalid", message: "That check-in was missing a name." });
+    return { type: "refused", reason: "invalid", message: "That check-in was missing a name." };
   }
 
   // Already waiting in the outbox from this device: the same answer again.
   const queued = store.getOutbox(code).find((i) => i.kind === "record" && i.payload.deviceHash === deviceHash);
-  if (queued) return reply({ type: "checked-in", at: queued.payload.at });
+  if (queued) return { type: "checked-in", at: queued.payload.at };
 
-  const payload = { deviceHash, name, note: note || null, at: new Date().toISOString() };
+  const payload = { deviceHash, name, note: note || null, at: new Date().toISOString(), method };
   const result = await postJson("host", { code, hostKey, action: "record", ...payload });
 
   if (result.ok) {
     setConnection("ok");
     upsertAttendee(result.data.attendee);
     render();
-    return reply({ type: "checked-in", at: result.data.attendee.checkedInAt });
+    return { type: "checked-in", at: result.data.attendee.checkedInAt };
   }
 
   const failure = connectionFailure(result);
   if (failure) {
     setConnection(failure);
     queue("record", payload);
-    return reply({ type: "checked-in", at: payload.at });
+    return { type: "checked-in", at: payload.at };
   }
 
-  return reply({ type: "refused", reason: result.reason, message: result.error });
+  return { type: "refused", reason: result.reason, message: result.error };
 }
 
-// The host screen has to stay on for same-wifi check-ins to reach it.
+/* -------------------------------------------------------------------------
+ * Tapping phones: in the app, this phone is the NFC tag people touch
+ * ---------------------------------------------------------------------- */
+
+function wantTap() {
+  return Boolean(event && event.allowTap && !event.ended && hostKey && AppBridge.has("tap"));
+}
+
+// Tells the app whether to answer taps, and with which event's key. Asked
+// again with force when the page comes back, as NFC may have been switched
+// on in the meantime.
+async function syncTap({ force = false } = {}) {
+  const want = wantTap();
+  if (want === tapWanted && !force) return;
+  tapWanted = want;
+  try {
+    const answer = await AppBridge.call("Here", "tap", want ? { on: true, code, hostKey } : { on: false });
+    tapState = answer?.state || "idle";
+  } catch {
+    tapState = want ? "error" : "idle";
+  }
+  renderTap();
+  updateWakeLock();
+}
+
+function renderTap() {
+  const row = $("tapRow");
+  row.hidden = !event || !event.allowTap || event.ended;
+  if (row.hidden) return;
+
+  const dot = $("tapDot");
+  const action = $("tapAction");
+  dot.className = "status-dot";
+  action.hidden = true;
+  let text;
+
+  if (!bridgeHeard) {
+    text = "Starting tap check-in.";
+  } else if (!AppBridge.has("tap")) {
+    dot.classList.add("warn");
+    text = AppBridge.native
+      ? "Update the uwuHere app to take taps."
+      : "Tapping phones works in the uwuHere app on an Android phone with NFC. Open this event there.";
+  } else if (tapState === "ready") {
+    dot.classList.add("ok");
+    text = "Ready for taps. People hold their phone against the back of this one.";
+  } else if (tapState === "nfc-off") {
+    dot.classList.add("warn");
+    text = "NFC is off on this phone. Turn it on to take taps.";
+    action.textContent = "Turn on";
+    action.dataset.do = "nfc";
+    action.hidden = false;
+  } else if (tapState === "unsupported") {
+    dot.classList.add("error");
+    text = "This phone can't take taps: it has no NFC. Open this event in the app on a phone that has it.";
+  } else if (tapState === "error") {
+    dot.classList.add("error");
+    text = "Tapping phones didn't start.";
+    action.textContent = "Retry";
+    action.dataset.do = "retry";
+    action.hidden = false;
+  } else {
+    text = "Starting tap check-in.";
+  }
+  $("tapText").textContent = text;
+}
+
+$("tapAction").addEventListener("click", () => {
+  if ($("tapAction").dataset.do === "nfc") AppBridge.call("Here", "openSettings", { what: "nfc" }).catch(() => {});
+  else syncTap({ force: true });
+});
+
+// The app says so as a phone reads the link. The check-in itself shows in
+// the list once they press the button on their phone.
+AppBridge.listen("Here", "tapped", () => toast("Phone tapped. They finish on their phone."));
+
+// Leaving this page, inside the app, stops the taps.
+window.addEventListener("pagehide", () => {
+  if (tapWanted) AppBridge.call("Here", "tap", { on: false }).catch(() => {});
+});
+
+/* -------------------------------------------------------------------------
+ * No internet: in the app, this phone is the attendees' wifi
+ * ---------------------------------------------------------------------- */
+
+// { status: "off" | "starting" | "on" | "failed", ssid, password, security,
+// url, message }, from the app (Hotspot.java).
+let hotspot = { status: "off" };
+
+function renderHotspot() {
+  const row = $("hotspotRow");
+  row.hidden = !event || event.ended || !AppBridge.has("hotspot");
+  if (row.hidden) return;
+
+  const dot = $("hotspotDot");
+  const action = $("hotspotAction");
+  dot.className = "status-dot";
+  dot.hidden = hotspot.status === "off";
+  action.disabled = hotspot.status === "starting";
+
+  if (hotspot.status === "on") {
+    dot.classList.add("ok");
+    $("hotspotText").textContent = `Hotspot on: ${hotspot.ssid}. Keep this page open.`;
+    action.textContent = "Show codes";
+  } else if (hotspot.status === "starting") {
+    $("hotspotText").textContent = "Starting the hotspot.";
+    action.textContent = "Start";
+  } else if (hotspot.status === "failed") {
+    dot.classList.add("error");
+    $("hotspotText").textContent = hotspot.message || "The hotspot didn't start.";
+    action.textContent = "Try again";
+  } else {
+    $("hotspotText").textContent = "No internet for attendees? This phone can be their wifi.";
+    action.textContent = "Start";
+  }
+}
+
+// WIFI:T:WPA;S:name;P:password;; is what phone cameras read as "join this
+// wifi". \ ; , : and " are escaped with a backslash.
+function wifiQrText({ ssid, password, security }) {
+  const esc = (s) => String(s ?? "").replace(/([\\;,:"])/g, "\\$1");
+  return security === "nopass"
+    ? `WIFI:T:nopass;S:${esc(ssid)};;`
+    : `WIFI:T:${security || "WPA"};S:${esc(ssid)};P:${esc(password)};;`;
+}
+
+function showHotspot() {
+  if (hotspot.status !== "on") return;
+  const wifi = wifiQrText(hotspot);
+  $("hotspotWifiQr").innerHTML = qrToSvg(wifi, { label: `QR code to join the wifi ${hotspot.ssid}` });
+  $("hotspotWifiText").textContent =
+    hotspot.security === "nopass" ? `Wifi: ${hotspot.ssid}` : `Wifi: ${hotspot.ssid}, password ${hotspot.password}`;
+  $("hotspotPageQr").innerHTML = qrToSvg(hotspot.url, { label: `QR code for ${hotspot.url}` });
+  $("hotspotPageText").textContent = hotspot.url;
+  openModal("hotspotModal");
+  if (AppBridge.has("brightness")) AppBridge.call("Here", "brightness", { max: true }).catch(() => {});
+}
+
+async function startHotspot() {
+  if (!event || event.ended || hotspot.status === "starting") return;
+  hotspot = { status: "starting" };
+  renderHotspot();
+  try {
+    const answer = await AppBridge.call("Here", "hotspot", {
+      on: true,
+      code,
+      title: event.title || "",
+      buttonLabel: event.buttonLabel,
+      buttonColor: event.buttonColor,
+      noteLabel: event.noteLabel || "",
+    });
+    hotspot = answer?.state === "on" ? { ...answer, status: "on" } : { status: "failed", message: answer?.message };
+  } catch (cause) {
+    hotspot = { status: "failed", message: cause?.message };
+  }
+  renderHotspot();
+  updateWakeLock();
+  if (hotspot.status === "on") showHotspot();
+}
+
+function stopHotspot() {
+  if (hotspot.status === "off") return;
+  hotspot = { status: "off" };
+  AppBridge.call("Here", "hotspot", { on: false }).catch(() => {});
+  closeIfOpen("hotspotModal");
+  renderHotspot();
+  updateWakeLock();
+}
+
+$("hotspotAction").addEventListener("click", () => {
+  if (hotspot.status === "on") showHotspot();
+  else startHotspot();
+});
+
+$("hotspotStop").addEventListener("click", stopHotspot);
+
+// A check-in from the hotspot's page, waiting on this answer.
+AppBridge.listen("Here", "hotspotCheckin", async (data) => {
+  const answer = await takeCheckin(data, "hotspot");
+  AppBridge.call("Here", "hotspotAnswer", {
+    id: data.id,
+    ok: answer.type === "checked-in",
+    at: answer.at || null,
+    message: answer.message || null,
+  }).catch(() => {});
+});
+
+// Android stopped it, such as for its own wifi.
+AppBridge.listen("Here", "hotspotStopped", () => {
+  hotspot = { status: "failed", message: "The hotspot stopped. Start it again if people still need it." };
+  closeIfOpen("hotspotModal");
+  renderHotspot();
+  updateWakeLock();
+});
+
+// Leaving this page, inside the app, stops the hotspot: its check-ins come here.
+window.addEventListener("pagehide", () => {
+  if (hotspot.status === "on" || hotspot.status === "starting") {
+    AppBridge.call("Here", "hotspot", { on: false }).catch(() => {});
+  }
+});
+
+// The host screen has to stay on for same-wifi check-ins to reach it, for
+// taps to be answered, and for hotspot check-ins to be recorded.
 let appAwake = false;
 
 async function updateWakeLock() {
   const want =
-    host && (p2p.status === "waiting" || p2p.status === "connected") && document.visibilityState === "visible";
+    ((host && (p2p.status === "waiting" || p2p.status === "connected")) ||
+      tapState === "ready" ||
+      hotspot.status === "on") &&
+    document.visibilityState === "visible";
 
   // The app's WebView has no navigator.wakeLock, so the app keeps its own
   // window's screen on instead.
@@ -599,7 +831,7 @@ $("qrShowBtn").addEventListener("click", showQr);
 $("qrTrayBtn").addEventListener("click", showQr);
 
 document.addEventListener("uwu:modalclose", ({ detail }) => {
-  if (detail.id === "qrModal" && AppBridge.has("brightness")) {
+  if ((detail.id === "qrModal" || detail.id === "hotspotModal") && AppBridge.has("brightness")) {
     AppBridge.call("Here", "brightness", { max: false }).catch(() => {});
   }
 });
@@ -747,7 +979,7 @@ $("endConfirm").addEventListener("click", async () => {
 
 /* ---- settings ---- */
 
-const settingsMethods = { p2p: true, location: false };
+const settingsMethods = { p2p: true, location: false, tap: false };
 let newSpot = null;
 
 function bindCounter(inputId, countId, max) {
@@ -806,6 +1038,7 @@ $("settingsBtn").addEventListener("click", () => {
   if (!$("sRadius").value) $("sRadius").value = "100";
   settingsMethods.p2p = event.allowP2p;
   settingsMethods.location = event.allowLocation;
+  settingsMethods.tap = event.allowTap;
   newSpot = null;
   $("sUseHere").setAttribute("aria-pressed", "false");
   $("sUseHereText").textContent = event.hasLocation ? "Move the spot to where I am now" : "Set the spot to where I am now";
@@ -846,7 +1079,9 @@ $("settingsForm").addEventListener("submit", async (e) => {
 
   const buttonLabel = $("sButtonLabel").value.trim();
   if (!buttonLabel) return fail("The button needs some text.");
-  if (!settingsMethods.p2p && !settingsMethods.location) return fail("Pick at least one way for people to check in.");
+  if (!settingsMethods.p2p && !settingsMethods.location && !settingsMethods.tap) {
+    return fail("Pick at least one way for people to check in.");
+  }
   if (settingsMethods.location && !event.hasLocation && !newSpot && !(await takeSpot())) return;
 
   const settings = {
@@ -856,6 +1091,7 @@ $("settingsForm").addEventListener("submit", async (e) => {
     noteLabel: $("sNoteLabel").value,
     allowP2p: settingsMethods.p2p,
     allowLocation: settingsMethods.location,
+    allowTap: settingsMethods.tap,
     radius: Number($("sRadius").value),
   };
   if (newSpot) settings.location = newSpot;
@@ -943,6 +1179,7 @@ document.addEventListener("visibilitychange", () => {
   refresh();
   // A phone that slept may have lost its peer.
   if (wantP2p() && (p2p.status === "error" || p2p.status === "idle")) restartP2p();
+  syncTap({ force: true });
   updateWakeLock();
 });
 
@@ -957,8 +1194,17 @@ window.addEventListener("offline", () => {
 });
 
 // In the app, same-wifi check-in can be up before the app has said what it
-// can do; once it has, the screen is kept on if it should be.
-if (AppBridge.native) AppBridge.ready(5000).then(updateWakeLock);
+// can do; once it has, the screen is kept on if it should be, and taps are
+// answered.
+if (AppBridge.native) {
+  AppBridge.ready(5000).then(() => {
+    bridgeHeard = true;
+    syncTap();
+    renderTap();
+    renderHotspot();
+    updateWakeLock();
+  });
+}
 
 async function boot() {
   if (!isValidCode(code)) {

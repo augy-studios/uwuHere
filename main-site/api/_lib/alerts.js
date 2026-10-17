@@ -1,8 +1,9 @@
 /* Check-in notifications for the host, in the Android app: "Alex checked in"
    and "Sam left early", for the two things that reach the server without the
    host's page seeing them, a check-in by location (api/checkin.js) and
-   leaving early (api/leave.js). Same-wifi check-ins arrive on the host's
-   own open page, so they never notify.
+   leaving early (api/leave.js). Same-wifi and hotspot check-ins arrive on
+   the host's own open page, and tapping phones happens at the host's phone,
+   so none of them notifies.
 
    **One FCM topic per event, named from its host key**: uwuhere-host- and the
    first 40 hex digits of the SHA-256 of the key. The host's phone works out

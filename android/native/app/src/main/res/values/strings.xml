@@ -4,4 +4,5 @@
     <string name="title_activity_main">uwuHere</string>
     <string name="package_name">org.uwuapps.here</string>
     <string name="custom_url_scheme">org.uwuapps.here</string>
+    <string name="tap_service">uwuHere tap check-in</string>
 </resources>

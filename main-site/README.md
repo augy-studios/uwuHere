@@ -18,7 +18,7 @@ For the repository as a whole, setup, and the migrations, see the
 
 ## How check-in works
 
-The host picks one or both ways to prove someone is here.
+The host picks one or more ways to prove someone is here.
 
 **Same wifi (P2P).** The host page registers with the public PeerJS broker as
 `uwuhere-CODE` and waits. An attendee's tap opens a direct WebRTC data channel
@@ -31,8 +31,27 @@ The host page has to stay open, and asks for a screen wake lock so it does.
 accepts it within the radius plus up to 100 m of the phone's own stated
 accuracy. Only the distance is stored, never the coordinates.
 
-With both on, the attendee page tries same wifi first, since it needs no
-permission prompt, and falls back to location.
+**Tapping phones.** Only the host needs the Android app. While the host page
+is open in it, the host's phone answers as an NFC tag (`TapService.java`), and
+each phone that touches it is handed this event's join link with a one-time
+token on the end, signed with the host key (`api/_lib/tap.js`). The
+attendee's phone opens it with its own tag reading, no app needed: most
+Android phones, and iPhones from the XS on. `/api/checkin` takes the token
+once, within 5 minutes of the tap. It proves the attendee touched the host's
+phone, and the host's phone needs no connection to make one. In Chrome on
+Android, a join page that's already open reads the tap itself (Web NFC);
+elsewhere the tap opens a new tab, which checks in by itself with the name
+already typed, and the first tab follows.
+
+With more than one on, the attendee page tries a tap first, if it has one,
+then same wifi, since it needs no permission prompt, then location.
+
+**With no internet.** Two more ways, both in the Android app, are in
+`../android/OFFLINE-CHECKIN.md`. A tap made with no connection is kept in the
+attendee's browser and sent later, recorded at the tap's time as "Tapped, sent
+later". And the host's phone can be a wifi hotspot serving a check-in page of
+its own, which any phone can join, with check-ins recorded by the host page like
+same-wifi ones ("Host's hotspot").
 
 **Once per browser.** A successful check-in is remembered in the attendee's
 browser and the button stays done. The server also keeps one row per device
@@ -91,7 +110,8 @@ js/colour-picker.js  the button colour's wheel, brightness and hex code box
 js/geo.js            one Geolocation reading, with sentences for failures
 js/qr.js             QR encoder, so the code works offline (from uwuPromptr)
 js/icons.js, ui.js   inline SVG icons; modals, toasts, small helpers
-js/app-bridge.js     the channel to the Android app (../android), when open in it
+js/app-bridge.js     the channel to the Android app (../android), when open in it;
+                     says which app builds hide the status bar
 js/app-update.js     the app's own update check, and the tray's "Check for updates"
 js/app-notify.js     the app's notifications bell, and each event's check-in alerts
 sw.js                service worker: caches the shell, waits to update
@@ -106,9 +126,9 @@ api/                 Vercel functions, see below
 | --- | --- |
 | `POST /api/events` | Make an event. Answers the code and host key. |
 | `GET /api/event?code=` | What the attendee page needs. With `X-Uwuhere-Device`, also whether this browser is checked in. |
-| `POST /api/checkin` | Check in by location. |
+| `POST /api/checkin` | Check in by location, or with a tap's token (`late` for one kept offline). |
 | `POST /api/leave` | I'm leaving early. |
-| `POST /api/host` | Everything the host does, by `action`: get, record, add, remove, pause, resume, update, password, end. |
+| `POST /api/host` | Everything the host does, by `action`: get, record (same wifi or the app's hotspot), add, remove, pause, resume, update, password, end. |
 | `POST /api/unlock` | Password to host key, for another device. |
 | `GET /api/cron/purge` | The daily purge, run by Vercel Cron with `CRON_SECRET`. |
 | `GET /api/app-release` | The Android app's newest release on GitHub, for its updater. Cached at the edge for 10 minutes. |
@@ -120,9 +140,10 @@ fixed slug the pages branch on. Shared code is in `api/_lib/`. The two
 Android app endpoints answer in their own shapes, as GitHub and the app's
 updater expect (`api/app-release.js`, `api/push/release.js`).
 
-`/api/checkin` and `/api/leave` also notify the host's phones in the Android
-app, if they turned check-in notifications on (`api/_lib/alerts.js`). It is
-skipped without `FIREBASE_SERVICE_ACCOUNT`, and never fails the check-in.
+`/api/checkin` (by location) and `/api/leave` also notify the host's phones in
+the Android app, if they turned check-in notifications on
+(`api/_lib/alerts.js`). It is skipped without `FIREBASE_SERVICE_ACCOUNT`, and
+never fails the check-in.
 
 ## Environment
 
@@ -193,3 +214,38 @@ the app's shows after the reload. `../android/README.md` has the app's checks.
   check-in arrives: "Not sent yet" on the host, sent once unblocked.
 - Host fully offline: the page and its last list still open; the same-wifi
   status says it needs a connection, since the broker introduces the devices.
+
+### Checking tapping phones by hand
+
+Needs the host's page open in the Android app, on a phone with NFC.
+
+- Touch an Android phone's back to the host's: its browser opens the join
+  page and checks in with the saved name. "Phone tapped" on the host.
+- The same with an iPhone (XS or later): a banner to tap, then the same.
+- A join page already open in Chrome on Android: "Tap phones to check in",
+  allow NFC, touch: checked in on that page, no new tab.
+- Tap, then use the link a second time from another browser: "That tap has
+  been used already".
+- NFC switched off on the host's phone: the host page says so, and "Turn on"
+  opens the NFC settings.
+- The host page in a browser, with tapping on: it says to open the event in
+  the app.
+- An attendee who has opened uwuHere before, in airplane mode: tap, and the
+  page says "Tapped, not sent yet". Back online, it's sent, and the host's list
+  shows "Tapped, sent later" at the tap's time.
+
+### Checking the hotspot by hand
+
+Needs the host's page open in the app, on Android 8 or later.
+
+- **Start**: Android asks for "Nearby devices" (13 and later) or location the
+  first time, then two QR codes.
+- An iPhone and an Android phone with mobile data off: scan the first code
+  (join the wifi), then the second (the page), type a name, press the button:
+  "You're checked in", and the name is on the host's list as "Host's hotspot".
+- The same with the host's phone offline too: the list shows it as "Not sent
+  yet" until the host's phone is back online.
+- Press the button again on the attendee's phone: still one row.
+- Close the host page while an attendee is on the hotspot page: their press
+  says the host's event page isn't open.
+- End the event: the hotspot stops.

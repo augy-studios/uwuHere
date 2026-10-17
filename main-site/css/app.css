@@ -311,6 +311,9 @@ main, .brand {
   grid-template-columns: repeat(2, 1fr);
   gap: 6px;
 }
+/* Three across, icon over the words, so "Tap phones" fits a phone's width. */
+.toggle-grid.three { grid-template-columns: repeat(3, 1fr); }
+.toggle-grid.three .toggle-btn { flex-direction: column; gap: 4px; padding: 10px 6px; text-align: center; }
 .toggle-btn {
   display: flex;
   align-items: center;
@@ -576,6 +579,8 @@ main, .brand {
    bars in the Android app, nearly the whole screen in a browser. */
 .modal.present { max-width: min(640px, 100%); max-height: 100%; align-items: stretch; text-align: center; }
 .present-event { font-size: 1.1rem; color: var(--ink); overflow-wrap: anywhere; }
+/* Two codes in the hotspot's view, each half the height the big QR gets. */
+.hotspot-qr svg { width: min(100%, 30vh); }
 .present-qr svg { width: min(100%, 62vh); }
 .present-code {
   font-size: clamp(2rem, 8vw, 3.2rem);
@@ -717,7 +722,7 @@ main, .brand {
 .here-status.error { color: var(--error); }
 .here-status.ok { color: var(--ok); }
 
-.leave-btn { align-self: center; width: min(72vw, 280px); }
+.leave-btn, .nfc-btn { align-self: center; width: min(72vw, 280px); }
 
 .method-note { text-align: center; font-size: 0.8rem; color: var(--muted); line-height: 1.4; }
 

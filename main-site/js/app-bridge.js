@@ -11,6 +11,7 @@
 //   AppBridge.has("keepawake")          whether the app says it can
 //   AppBridge.ready(ms)                 resolves true once the app has answered, false after ms
 //   AppBridge.call(plugin, method, {})  a plugin's answer
+//   AppBridge.listen(plugin, name, fn)  fn(data) each time the plugin says name
 //   AppBridge.version()                 the app's version, such as "1.0.0"
 //
 // Also, in the app: the status bar's icons follow the page's light or dark
@@ -25,6 +26,17 @@ const waiting = [];
 
 function call(plugin, method, options = {}) {
   return native ? cap.nativePromise(plugin, method, options) : Promise.reject(new Error("Not in the app."));
+}
+
+// Capacitor's own bridge has addListener on window.Capacitor. Outside the
+// app, nothing is ever said.
+function listen(plugin, name, fn) {
+  if (!native || typeof cap.addListener !== "function") return;
+  try {
+    cap.addListener(plugin, name, fn);
+  } catch {
+    // An app too old to say it: the page carries on without hearing.
+  }
 }
 
 function heard(answer) {
@@ -68,5 +80,6 @@ export const AppBridge = {
   has: (feature) => Boolean(info?.features?.includes(feature)),
   ready,
   call,
+  listen,
   version: () => info?.version || null,
 };

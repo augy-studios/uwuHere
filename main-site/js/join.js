@@ -3,9 +3,17 @@
 // One big button. Pressing it proves the attendee is near the host, by the
 // first method the event allows that works:
 //
-//   1. Same wifi. A direct P2P channel to the host's open page. No permission
+//   1. Tapping phones. Touching the host's phone hands over a link with a
+//      one-time token (api/_lib/tap.js). It opens this page in a new tab,
+//      which checks in at once with the name already typed, and this tab
+//      follows (the storage event below). In Chrome on Android, a page already
+//      open reads the tap itself instead (Web NFC), with no new tab.
+//      With no connection, the tap is kept in this browser and sent once
+//      there is one, marked as sent late (api/_lib/tap.js). A browser that has
+//      opened uwuHere before has this page cached, so it opens offline.
+//   2. Same wifi. A direct P2P channel to the host's open page. No permission
 //      prompt, and almost always means the same network.
-//   2. Location. One reading, sent to the server, which checks the distance
+//   3. Location. One reading, sent to the server, which checks the distance
 //      and keeps only the distance.
 //
 // **Once per browser.** A check-in that succeeded is remembered here and the
@@ -27,7 +35,34 @@ import {
 bootShell();
 
 const $ = (id) => document.getElementById(id);
-const code = normaliseCode(new URLSearchParams(location.search).get("id"));
+const params = new URLSearchParams(location.search);
+const code = normaliseCode(params.get("id"));
+
+// From a tap on the host's phone. Taken out of the address straight away, so
+// the link left in the address bar, shared or bookmarked, carries no token.
+let tapToken = params.get("tap");
+if (tapToken) {
+  params.delete("tap");
+  history.replaceState(null, "", `${location.pathname}?${params}`);
+}
+
+const TAP_HOW = "Hold the top of your phone against the back of the host's phone.";
+const OFFLINE_TAP = "You're offline. Press the button and your tap is kept, then sent once you're back online.";
+
+// Opened by a tap: checks in by itself once the event has loaded, if the
+// name is already filled in. Touching phones is the press.
+let autoTap = Boolean(tapToken);
+
+// The time a tap token says it was made, from its first part.
+function tapTime(token) {
+  const seconds = Number(String(token).split(".")[0]);
+  return Number.isFinite(seconds) && seconds > 0 ? new Date(seconds * 1000).toISOString() : new Date().toISOString();
+}
+
+// Chrome on Android can read the tap in this page (Web NFC). Elsewhere the
+// phone's own tag reading opens the link in a new tab.
+const canReadTags = "NDEFReader" in window;
+let tagScan = null; // an AbortController while listening
 
 // How long to wait for the host's page to answer once the channel is open.
 // It saves to the server before answering, so this covers a slow request.
@@ -99,7 +134,9 @@ function render() {
   $("hereSub").hidden = !checked;
   if (checked) {
     $("hereLabel").textContent = "You're here";
-    $("hereSub").textContent = `Checked in at ${formatTime(attendance.checkedInAt)}`;
+    $("hereSub").textContent = attendance.held
+      ? `Tapped at ${formatTime(attendance.checkedInAt)}, not sent yet`
+      : `Checked in at ${formatTime(attendance.checkedInAt)}`;
     button.style.setProperty("--here-size", "1.7rem");
   } else {
     $("hereLabel").textContent = event.buttonLabel;
@@ -113,10 +150,17 @@ function render() {
   button.setAttribute("aria-busy", String(busy));
 
   $("doneCard").hidden = !checked || !attendance.name;
-  $("doneCard").textContent = checked ? `Checked in as ${attendance.name}.` : "";
+  $("doneCard").textContent = !checked
+    ? ""
+    : attendance.held
+      ? `Tapped as ${attendance.name}. It's sent as soon as this phone is back online.`
+      : `Checked in as ${attendance.name}.`;
 
   const left = attendance?.leftEarlyAt;
-  $("leaveBtn").disabled = !checked || Boolean(left) || busy;
+  $("nfcBtn").hidden = !canReadTags || !event.allowTap || checked || Boolean(tagScan);
+  if (checked) stopTagScan();
+
+  $("leaveBtn").disabled = !checked || Boolean(attendance?.held) || Boolean(left) || busy;
   $("leaveText").textContent = left ? `Left at ${formatTime(left)}` : "I'm leaving early";
 
   // The paused notice comes and goes with the host; any other status stays.
@@ -124,9 +168,10 @@ function render() {
   else if ($("hereStatus").textContent === PAUSED) setStatus("");
 
   const ways = [];
+  if (event.allowTap) ways.push("tapping your phone on the host's phone");
   if (event.allowP2p) ways.push("being on the same wifi as the host");
   if (event.allowLocation) ways.push(`being within ${event.radius} m of the host (your location is used once, and only the distance is kept)`);
-  $("methodNote").textContent = checked ? "" : `Checks that you are here by ${ways.join(", or by ")}.`;
+  $("methodNote").textContent = checked || event.offlineStub ? "" : `Checks that you are here by ${ways.join(", or by ")}.`;
 }
 
 /* -------------------------------------------------------------------------
@@ -155,6 +200,9 @@ async function load() {
     store.saveEventCache(code, event);
     reconcile(me);
     render();
+    startTagScanIfAllowed();
+    sendHeldTap();
+    runAutoTap();
     return;
   }
 
@@ -166,7 +214,33 @@ async function load() {
 
   if (event) {
     // A cached copy is on screen already; say why it may be out of date.
-    if (result.offline && !busy) setStatus("You're offline. Checking in needs a connection.");
+    if (result.offline && !busy && !attendance?.checkedInAt) {
+      setStatus(tapToken ? OFFLINE_TAP : "You're offline. Checking in needs a connection.");
+    }
+    if (result.offline) runAutoTap();
+    return;
+  }
+
+  // Opened by a tap with no connection, at an event this browser hasn't
+  // seen: enough of a page to take the name and keep the tap.
+  if (result.offline && tapToken) {
+    event = {
+      code,
+      title: "",
+      buttonLabel: "I'm here",
+      buttonColor: "#ccffcc",
+      noteLabel: null,
+      allowTap: true,
+      allowP2p: false,
+      allowLocation: false,
+      radius: 0,
+      paused: false,
+      ended: false,
+      offlineStub: true,
+    };
+    render();
+    setStatus(OFFLINE_TAP);
+    runAutoTap();
     return;
   }
 
@@ -259,6 +333,149 @@ function viaP2p(name, note) {
   });
 }
 
+async function viaTap(name, note) {
+  setStatus("Checking you in with the tap.");
+  const result = await postJson("checkin", {
+    code,
+    deviceId: store.deviceId(),
+    name,
+    note: note || null,
+    tap: tapToken,
+  });
+
+  if (result.ok) return { ok: true, at: result.data.attendee.checkedInAt, method: "tap" };
+
+  // No connection: the tap is kept, and sent when there is one.
+  if (result.offline) {
+    const held = { token: tapToken, name, note: note || null, tappedAt: tapTime(tapToken) };
+    store.saveHeldTap(code, held);
+    tapToken = null;
+    return { ok: true, held: true, at: held.tappedAt, method: "tap" };
+  }
+
+  // Spent, stale or broken: no use trying it again.
+  if (["tap-bad", "tap-old", "tap-used"].includes(result.reason)) tapToken = null;
+  if (result.reason === "ended") event.ended = true;
+  if (result.reason === "paused") event.paused = true;
+  return {
+    ok: false,
+    message: result.error,
+    fallback: !["ended", "paused", "invalid"].includes(result.reason),
+  };
+}
+
+// A tap kept while offline, sent now if there's a connection. Called when
+// the event loads and when the phone comes back online.
+let sendingHeld = false;
+async function sendHeldTap() {
+  const held = store.getHeldTap(code);
+  if (!held || sendingHeld) return;
+  sendingHeld = true;
+  try {
+    const result = await postJson("checkin", {
+      code,
+      deviceId: store.deviceId(),
+      name: held.name,
+      note: held.note,
+      tap: held.token,
+      late: true,
+    });
+    if (result.offline) return;
+
+    store.saveHeldTap(code, null);
+    if (result.ok) {
+      attendance = { ...(attendance ?? {}), checkedInAt: result.data.attendee.checkedInAt, held: false, name: held.name };
+      store.saveAttendance(code, attendance);
+      setStatus(`Your tap from ${formatTime(held.tappedAt)} was sent. You're checked in.`, "ok");
+    } else {
+      // Refused for good, such as an event that ended meanwhile: the button
+      // is free again, unless this browser checked in some other way.
+      if (attendance?.held) {
+        attendance = null;
+        store.saveAttendance(code, null);
+      }
+      if (result.reason === "ended" && event) event.ended = true;
+      setStatus(`Your tap from ${formatTime(held.tappedAt)} couldn't be sent: ${result.error}`, "error");
+    }
+    render();
+  } finally {
+    sendingHeld = false;
+  }
+}
+
+window.addEventListener("online", sendHeldTap);
+
+// Opened by a tap: check in by itself if the name is already filled in.
+function runAutoTap() {
+  if (!autoTap || !event) return;
+  autoTap = false;
+  if (cleanLine($("nameInput").value) && event.allowTap && !attendance?.checkedInAt) checkIn();
+}
+
+/* ---- reading the tap in this page (Web NFC, Chrome on Android) ---- */
+
+function stopTagScan() {
+  tagScan?.abort();
+  tagScan = null;
+}
+
+// The host's phone hands over one link: this event's join page with a tap
+// token. Anything else touched is ignored.
+function onTag({ message }) {
+  for (const record of message.records) {
+    if (record.recordType !== "url") continue;
+    let url;
+    try {
+      url = new URL(new TextDecoder().decode(record.data));
+    } catch {
+      continue;
+    }
+    if (url.origin !== location.origin || normaliseCode(url.searchParams.get("id")) !== code) continue;
+    const token = url.searchParams.get("tap");
+    if (!token) continue;
+    tapToken = token;
+    if (busy) return;
+    if (!cleanLine($("nameInput").value)) {
+      setStatus("Tapped. Type your name, then press the button.");
+      $("nameInput").focus();
+      return;
+    }
+    checkIn();
+    return;
+  }
+}
+
+async function startTagScan() {
+  if (!canReadTags || tagScan || !event?.allowTap || attendance?.checkedInAt) return;
+  const controller = new AbortController();
+  tagScan = controller;
+  try {
+    const reader = new NDEFReader();
+    reader.addEventListener("reading", onTag);
+    await reader.scan({ signal: controller.signal });
+    if (!busy && !attendance?.checkedInAt) setStatus(`Ready. ${TAP_HOW}`);
+  } catch (cause) {
+    if (tagScan === controller) tagScan = null;
+    if (cause?.name === "NotAllowedError") setStatus("NFC wasn't allowed. Allow it in Chrome's site settings to tap.", "error");
+    else if (cause?.name === "NotReadableError") setStatus("Turn on NFC in your phone's settings, then try again.", "error");
+  }
+  render();
+}
+
+// Without asking: only once this site has been allowed NFC before. The first
+// time needs a press (the button under the big one), for Chrome's prompt.
+async function startTagScanIfAllowed() {
+  if (!canReadTags || tagScan || !event?.allowTap || attendance?.checkedInAt) return;
+  try {
+    const permission = await navigator.permissions.query({ name: "nfc" });
+    if (permission.state === "granted") startTagScan();
+  } catch {
+    // No way to ask: the button is there.
+  }
+}
+
+$("nfcBtn").addEventListener("click", startTagScan);
+
 async function viaLocation(name, note) {
   let position;
   try {
@@ -296,6 +513,11 @@ async function checkIn() {
   }
   if (charCount(name) > 60) return setStatus("Your name can be at most 60 characters.", "error");
   if (charCount(note) > 120) return setStatus(`${event.noteLabel} can be at most 120 characters.`, "error");
+  // Tapping is the only way in, and there's been no tap yet.
+  if (event.allowTap && !tapToken && !event.allowP2p && !event.allowLocation) {
+    if (canReadTags && !tagScan) startTagScan();
+    return setStatus(TAP_HOW);
+  }
   store.saveProfile({ name, note });
 
   busy = true;
@@ -304,7 +526,9 @@ async function checkIn() {
   try {
     let outcome = { ok: false, message: "" };
 
-    if (event.allowP2p) {
+    if (event.allowTap && tapToken) outcome = await viaTap(name, note);
+
+    if (!outcome.ok && event.allowP2p && outcome.fallback !== false && !event.ended) {
       setStatus("Looking for the host's screen on this wifi.");
       outcome = await viaP2p(name, note);
     }
@@ -315,9 +539,9 @@ async function checkIn() {
     }
 
     if (outcome.ok) {
-      attendance = { checkedInAt: outcome.at, method: outcome.method, leftEarlyAt: null, name };
+      attendance = { checkedInAt: outcome.at, method: outcome.method, leftEarlyAt: null, name, held: Boolean(outcome.held) };
       store.saveAttendance(code, attendance);
-      setStatus("You're checked in.", "ok");
+      setStatus(outcome.held ? "Tap kept. It's sent as soon as this phone is back online." : "You're checked in.", "ok");
     } else {
       setStatus(outcome.message || "Could not check you in. Try again.", "error");
     }
@@ -328,6 +552,25 @@ async function checkIn() {
 }
 
 $("hereBtn").addEventListener("click", checkIn);
+
+// Kept as it's typed, so a tap that opens this page in a new tab finds the
+// name already there and can check in by itself.
+for (const id of ["nameInput", "noteInput"]) {
+  $(id).addEventListener("input", () => {
+    store.saveProfile({ name: cleanLine($("nameInput").value), note: cleanLine($("noteInput").value) });
+  });
+}
+
+// A check-in made in another tab of this browser, such as the one a tap
+// opened: this tab shows it too.
+window.addEventListener("storage", (e) => {
+  if (e.key !== `uwuhere.attend.${code}` || !isValidCode(code)) return;
+  const theirs = store.getAttendance(code);
+  if (!theirs?.checkedInAt || attendance?.checkedInAt) return;
+  attendance = theirs;
+  setStatus("You're checked in.", "ok");
+  render();
+});
 
 /* -------------------------------------------------------------------------
  * Leaving early
@@ -404,5 +647,6 @@ if (!isValidCode(code)) {
 
   event = store.getEventCache(code);
   if (event) render();
+  if (tapToken && !attendance?.checkedInAt) setStatus("Tapped. Press the button to check in.");
   load();
 }

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Tapping phones (TapService.java): the NFC Forum's NDEF tag application, so phones that touch
+     this one read it as a tag holding a link. "other", not payment: it never stands in for a
+     card. -->
+<host-apdu-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:description="@string/tap_service">
+    <aid-group android:category="other" android:description="@string/tap_service">
+        <aid-filter android:name="D2760000850101" />
+    </aid-group>
+</host-apdu-service>

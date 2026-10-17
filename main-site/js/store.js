@@ -7,6 +7,7 @@
 //   uwuhere.outbox.CODE     host changes made offline, waiting to be sent
 //   uwuhere.event.CODE      the attendee page's last copy of an event
 //   uwuhere.attend.CODE     this browser's own check-in to an event
+//   uwuhere.heldtap.CODE    a tap made with no connection, to send later
 //
 // Every read and write tolerates storage being unavailable (private mode,
 // blocked site data): the app still works for the page view.
@@ -129,4 +130,13 @@ export function getAttendance(code) {
 
 export function saveAttendance(code, attendance) {
   write(`attend.${code}`, attendance);
+}
+
+/** { token, name, note, tappedAt }, or null. */
+export function getHeldTap(code) {
+  return read(`heldtap.${code}`);
+}
+
+export function saveHeldTap(code, held) {
+  write(`heldtap.${code}`, held);
 }

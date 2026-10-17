@@ -43,7 +43,7 @@ codeForm("openForm", "openCode", "openError", "/host");
 /* ---- create ---- */
 
 const LIMITS = { title: 80, buttonLabel: 20, noteLabel: 40 };
-const methods = { p2p: true, location: false };
+const methods = { p2p: true, location: false, tap: false };
 
 function counter(inputId, countId, max) {
   const input = $(inputId);
@@ -82,6 +82,11 @@ function renderMethods() {
   if (methods.location) {
     hints.push("Location: attendees share their location once and must be near where you are now.");
   }
+  if (methods.tap) {
+    hints.push(
+      "Tap phones: attendees touch their phone to yours. Needs this event open in the uwuHere app, on an Android phone with NFC."
+    );
+  }
   $("methodHint").textContent = hints.join(" ") || "Pick at least one.";
 }
 
@@ -115,7 +120,9 @@ $("createForm").addEventListener("submit", async (e) => {
   if (charCount(buttonLabel) > LIMITS.buttonLabel) {
     return showCreateError(`The button text can be at most ${LIMITS.buttonLabel} characters.`);
   }
-  if (!methods.p2p && !methods.location) return showCreateError("Pick at least one way for people to check in.");
+  if (!methods.p2p && !methods.location && !methods.tap) {
+    return showCreateError("Pick at least one way for people to check in.");
+  }
   if (password && !checkPassword(password, { title: $("title").value }).ok) {
     $("password").focus();
     return showCreateError("That password is not strong enough yet. See the checklist under it.");
@@ -143,6 +150,7 @@ $("createForm").addEventListener("submit", async (e) => {
       noteLabel: $("noteLabel").value,
       allowP2p: methods.p2p,
       allowLocation: methods.location,
+      allowTap: methods.tap,
       radius: Number($("radius").value),
       location: position,
       password: password || undefined,
