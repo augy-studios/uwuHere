@@ -14,7 +14,8 @@
 //   AppBridge.version()                 the app's version, such as "1.0.0"
 //
 // Also, in the app: the status bar's icons follow the page's light or dark
-// mode, not the phone's.
+// mode, not the phone's, and from app 1.0.1 (user agent uwuHereApp/2) there's
+// no status bar to leave room for (data-statusbar="hidden", css/app.css).
 
 const cap = window.Capacitor;
 const native = Boolean(cap && typeof cap.nativePromise === "function" && cap.getPlatform?.() === "android");
@@ -50,6 +51,10 @@ function syncBars() {
 
 if (native) {
   document.documentElement.setAttribute("data-app", "android");
+  // Read from the user agent, not Here.info, so the page is laid out right
+  // from the start. 1.0.0 (uwuHereApp/1) still has the bar.
+  const build = Number(/uwuHereApp\/(\d+)/.exec(navigator.userAgent)?.[1] || 0);
+  if (build >= 2) document.documentElement.setAttribute("data-statusbar", "hidden");
   call("Here", "info")
     .then(heard)
     .catch(() => heard({ features: [] }));

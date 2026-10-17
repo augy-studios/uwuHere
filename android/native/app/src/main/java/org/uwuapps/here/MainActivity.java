@@ -10,16 +10,21 @@
  *
  * Here: what the app was opened with (one of the site's own links, such as a scanned QR code, a
  * uwu://here/ link, or a tapped notification) opened in the page, the back button going back
- * through the page's history, and the notification channels.
+ * through the page's history, the notification channels, and no status bar.
  */
 package org.uwuapps.here;
 
 import android.content.Intent;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
+import android.view.WindowManager;
 import android.webkit.WebView;
 
 import androidx.activity.OnBackPressedCallback;
+import androidx.core.view.WindowCompat;
+import androidx.core.view.WindowInsetsCompat;
+import androidx.core.view.WindowInsetsControllerCompat;
 
 import com.getcapacitor.BridgeActivity;
 
@@ -33,6 +38,14 @@ public class MainActivity extends BridgeActivity {
         Notifications.createChannels(this);
         super.onCreate(savedInstanceState);
 
+        // The page runs up into the camera's cutout, where the status bar was, rather than
+        // leaving a black strip there on phones older than Android 15.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            WindowManager.LayoutParams attrs = getWindow().getAttributes();
+            attrs.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+            getWindow().setAttributes(attrs);
+        }
+
         // Back goes back through the page's history, as in a browser. Off the first page, the
         // app goes to the background rather than closing, so a host's page keeps its place.
         getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
@@ -43,6 +56,20 @@ public class MainActivity extends BridgeActivity {
                 else moveTaskToBack(true);
             }
         });
+    }
+
+    // No status bar: the page has the whole screen, and a swipe down from the top shows the bar
+    // for a moment. Done here rather than in onCreate because Capacitor's SystemBars shows every
+    // bar as it starts, and again whenever the window comes back, as the bar can be left showing
+    // by the notification shade or another app. The page leaves no room for the bar
+    // (capacitor.config.json's user agent, uwuHereApp/2, tells it so: js/app-bridge.js).
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (!hasFocus) return;
+        WindowInsetsControllerCompat bars = WindowCompat.getInsetsController(getWindow(), getWindow().getDecorView());
+        bars.setSystemBarsBehavior(WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+        bars.hide(WindowInsetsCompat.Type.statusBars());
     }
 
     // BridgeActivity calls this with the intent the app was opened with too, once the page has

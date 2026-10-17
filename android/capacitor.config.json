@@ -8,7 +8,7 @@
   },
   "android": {
     "path": "native",
-    "appendUserAgent": "uwuHereApp/1"
+    "appendUserAgent": "uwuHereApp/2"
   },
   "plugins": {
     "SystemBars": {

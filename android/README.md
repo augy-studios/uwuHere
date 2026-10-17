@@ -20,7 +20,7 @@ itself from there.
 | **Notifications**, opt-in from the bell in the Edge Tray: check-ins by location and early leavers at your events, new versions of the app (pushed the moment a release is published), and news you send from the Firebase console | `HerePlugin.setTopic`, `HerePlugin.watchEvent` (FCM topics), `Notifications`, Capacitor's PushNotifications | `js/app-notify.js`, `api/_lib/alerts.js`, `api/push/release.js`, `api/_lib/fcm.js` |
 | **The site's own links** (`https://here.uwuapps.org/...`, verified by `.well-known/assetlinks.json`), so scanning a host's QR code with the phone's camera opens the check-in button in the app. Also `uwu://here/` links, such as `uwu://here/join?id=BCD234` | `MainActivity` | none |
 | **Location** for checking in and setting the event's spot, with Android's own permission prompt | the manifest's location permissions; Capacitor's WebView asks | `js/geo.js` (the sentence for a refusal) |
-| **Status bar** icons that follow the page's light or dark mode, not the phone's | Capacitor's SystemBars | `js/app-bridge.js` |
+| **No status bar**, so the page has the whole screen; a swipe down from the top shows it for a moment, its icons following the page's light or dark mode, not the phone's. The user agent's `uwuHereApp/2` tells the page there's no bar to leave room for (1.0.0, `uwuHereApp/1`, still has it) | `MainActivity`, Capacitor's SystemBars | `js/app-bridge.js`, `css/app.css` (`data-statusbar`) |
 
 The website and PWA lose nothing: everything a browser can do stays as it was, and these only
 switch on when the page is running in the app. The bell and the update button are made by the
