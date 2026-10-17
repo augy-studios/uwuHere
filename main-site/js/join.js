@@ -11,9 +11,12 @@
 //      With no connection, the tap is kept in this browser and sent once
 //      there is one, marked as sent late (api/_lib/tap.js). A browser that has
 //      opened uwuHere before has this page cached, so it opens offline.
-//   2. Same wifi. A direct P2P channel to the host's open page. No permission
+//   2. Bluetooth, only in the uwuHere app on Android: phone to phone with the
+//      host's app over Nearby Connections (Mesh.java), no internet needed on
+//      either. Asks for "Nearby devices" the first time.
+//   3. Same wifi. A direct P2P channel to the host's open page. No permission
 //      prompt, and almost always means the same network.
-//   3. Location. One reading, sent to the server, which checks the distance
+//   4. Location. One reading, sent to the server, which checks the distance
 //      and keeps only the distance.
 //
 // **Once per browser.** A check-in that succeeded is remembered here and the
@@ -27,6 +30,7 @@ import { bootShell } from "./shell.js";
 import { api, postJson } from "./api.js";
 import { Guest, normaliseCode, isValidCode, PROTOCOL_VERSION } from "./p2p.js";
 import { getPosition } from "./geo.js";
+import { AppBridge } from "./app-bridge.js";
 import * as store from "./store.js";
 import {
   formatTime, hydrateIcons, openModal, closeModal, toast, charCount, paintHereButton, hereLabelSize,
@@ -169,6 +173,7 @@ function render() {
 
   const ways = [];
   if (event.allowTap) ways.push("tapping your phone on the host's phone");
+  if (event.allowBluetooth && AppBridge.has("mesh")) ways.push("Bluetooth, phone to phone with the host");
   if (event.allowP2p) ways.push("being on the same wifi as the host");
   if (event.allowLocation) ways.push(`being within ${event.radius} m of the host (your location is used once, and only the distance is kept)`);
   $("methodNote").textContent = checked || event.offlineStub ? "" : `Checks that you are here by ${ways.join(", or by ")}.`;
@@ -222,15 +227,18 @@ async function load() {
   }
 
   // Opened by a tap with no connection, at an event this browser hasn't
-  // seen: enough of a page to take the name and keep the tap.
-  if (result.offline && tapToken) {
+  // seen, or in the app, where Bluetooth needs no connection: enough of a
+  // page to take the name and check in.
+  if (result.offline && AppBridge.native) await AppBridge.ready(1500);
+  if (result.offline && (tapToken || AppBridge.has("mesh"))) {
     event = {
       code,
       title: "",
       buttonLabel: "I'm here",
       buttonColor: "#ccffcc",
       noteLabel: null,
-      allowTap: true,
+      allowTap: Boolean(tapToken),
+      allowBluetooth: AppBridge.has("mesh"),
       allowP2p: false,
       allowLocation: false,
       radius: 0,
@@ -239,7 +247,7 @@ async function load() {
       offlineStub: true,
     };
     render();
-    setStatus(OFFLINE_TAP);
+    setStatus(tapToken ? OFFLINE_TAP : "You're offline. Press the button to check in by Bluetooth with the host's phone.");
     runAutoTap();
     return;
   }
@@ -476,6 +484,34 @@ async function startTagScanIfAllowed() {
 
 $("nfcBtn").addEventListener("click", startTagScan);
 
+// Bluetooth, app to app: the app finds the host's phone, checks in, and hangs
+// up (Mesh.java). Only in the uwuHere app.
+async function viaMesh(name, note) {
+  setStatus("Looking for the host's phone by Bluetooth.");
+  let answer;
+  try {
+    answer = await AppBridge.call("Here", "meshCheckIn", {
+      code,
+      name,
+      note: note || null,
+      deviceHash: await store.deviceHash(),
+    });
+  } catch (cause) {
+    return { ok: false, message: cause?.message || "Bluetooth check-in didn't work. Try again." };
+  }
+  if (answer?.ok) {
+    const at = typeof answer.at === "string" && !Number.isNaN(Date.parse(answer.at)) ? answer.at : new Date().toISOString();
+    return { ok: true, at, method: "mesh" };
+  }
+  if (answer?.reason === "refused" && /paused/i.test(answer.message || "") && event) event.paused = true;
+  return {
+    ok: false,
+    message: answer?.message || "Bluetooth check-in didn't work. Try again.",
+    // Refused by the host: the other ways would be refused too.
+    fallback: answer?.reason !== "refused",
+  };
+}
+
 async function viaLocation(name, note) {
   let position;
   try {
@@ -513,10 +549,14 @@ async function checkIn() {
   }
   if (charCount(name) > 60) return setStatus("Your name can be at most 60 characters.", "error");
   if (charCount(note) > 120) return setStatus(`${event.noteLabel} can be at most 120 characters.`, "error");
-  // Tapping is the only way in, and there's been no tap yet.
-  if (event.allowTap && !tapToken && !event.allowP2p && !event.allowLocation) {
-    if (canReadTags && !tagScan) startTagScan();
-    return setStatus(TAP_HOW);
+  // No way in that works here: Bluetooth needs the app, and a tap the phone.
+  const bluetoothHere = event.allowBluetooth && AppBridge.has("mesh");
+  if (!event.allowP2p && !event.allowLocation && !bluetoothHere && !(event.allowTap && tapToken)) {
+    if (event.allowTap) {
+      if (canReadTags && !tagScan) startTagScan();
+      return setStatus(TAP_HOW);
+    }
+    return setStatus("This event checks people in by Bluetooth with the uwuHere app for Android. Install it, or ask the host.", "error");
   }
   store.saveProfile({ name, note });
 
@@ -527,6 +567,10 @@ async function checkIn() {
     let outcome = { ok: false, message: "" };
 
     if (event.allowTap && tapToken) outcome = await viaTap(name, note);
+
+    if (!outcome.ok && event.allowBluetooth && AppBridge.has("mesh") && outcome.fallback !== false && !event.ended) {
+      outcome = await viaMesh(name, note);
+    }
 
     if (!outcome.ok && event.allowP2p && outcome.fallback !== false && !event.ended) {
       setStatus("Looking for the host's screen on this wifi.");

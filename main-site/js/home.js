@@ -43,7 +43,7 @@ codeForm("openForm", "openCode", "openError", "/host");
 /* ---- create ---- */
 
 const LIMITS = { title: 80, buttonLabel: 20, noteLabel: 40 };
-const methods = { p2p: true, location: false, tap: false };
+const methods = { p2p: true, location: false, tap: false, bluetooth: false };
 
 function counter(inputId, countId, max) {
   const input = $(inputId);
@@ -87,6 +87,12 @@ function renderMethods() {
       "Tap phones: attendees touch their phone to yours. Needs this event open in the uwuHere app, on an Android phone with NFC."
     );
   }
+  if (methods.bluetooth) {
+    hints.push(
+      "Bluetooth: attendees who have the uwuHere app on Android check in phone to phone, even with no internet. Needs this event open in the app." +
+        (methods.p2p || methods.location || methods.tap ? "" : " Turn on another way too, for everyone without the app.")
+    );
+  }
   $("methodHint").textContent = hints.join(" ") || "Pick at least one.";
 }
 
@@ -120,7 +126,7 @@ $("createForm").addEventListener("submit", async (e) => {
   if (charCount(buttonLabel) > LIMITS.buttonLabel) {
     return showCreateError(`The button text can be at most ${LIMITS.buttonLabel} characters.`);
   }
-  if (!methods.p2p && !methods.location && !methods.tap) {
+  if (!methods.p2p && !methods.location && !methods.tap && !methods.bluetooth) {
     return showCreateError("Pick at least one way for people to check in.");
   }
   if (password && !checkPassword(password, { title: $("title").value }).ok) {
@@ -151,6 +157,7 @@ $("createForm").addEventListener("submit", async (e) => {
       allowP2p: methods.p2p,
       allowLocation: methods.location,
       allowTap: methods.tap,
+      allowBluetooth: methods.bluetooth,
       radius: Number($("radius").value),
       location: position,
       password: password || undefined,

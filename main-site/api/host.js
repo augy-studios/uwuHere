@@ -5,8 +5,10 @@
      get                             the event and its attendees
      record   { deviceHash, name, note, at, method }
                                      a check-in the host's page received: by
-                                     same wifi (method "p2p", the default), or
-                                     through the app's hotspot ("hotspot")
+                                     same wifi (method "p2p", the default),
+                                     through the app's hotspot ("hotspot"), or
+                                     from the app on the attendee's phone over
+                                     Nearby Connections ("mesh")
      add      { name, note, at }     somebody added by hand
      remove   { attendeeId }
      pause / resume
@@ -52,7 +54,7 @@ export default endpoint(["POST"], async (req, res) => {
       const result = await insertAttendee(event.id, {
         device_hash: v.deviceHash(body.deviceHash),
         ...attendeeFields(body, event),
-        method: body.method === "hotspot" ? "hotspot" : "p2p",
+        method: ["hotspot", "mesh"].includes(body.method) ? body.method : "p2p",
         checked_in_at: v.pastTime(body.at, event.created_at),
       });
       return ok(res, result, result.already ? 200 : 201);

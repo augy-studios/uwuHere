@@ -29,6 +29,7 @@ export const icons = {
   pin: svg(`<path d="M12 21s-7-6.2-7-12a7 7 0 0 1 14 0c0 5.8-7 12-7 12z"/><circle cx="12" cy="9" r="2.5"/>`),
   // A phone with the waves of a contactless tap, for tapping phones.
   tap: svg(`<rect x="4" y="3" width="10" height="18" rx="2"/><path d="M17.5 9a4.5 4.5 0 0 1 0 6M20.5 6.5a8 8 0 0 1 0 11"/>`),
+  bluetooth: svg(`<path d="m7 7 10 10-5 5V2l5 5L7 17"/>`),
   // A phone sending out wifi, for the app's hotspot.
   hotspot: svg(`<rect x="8" y="10" width="8" height="12" rx="1.5"/><path d="M12 19h.01"/><path d="M8.5 6.5a5 5 0 0 1 7 0M5.5 3.5a9 9 0 0 1 13 0"/>`),
   wifi: svg(`<path d="M2 8.8a15 15 0 0 1 20 0M5 12.5a10 10 0 0 1 14 0M8.5 16a5 5 0 0 1 7 0"/><path d="M12 19.5v.01"/>`),

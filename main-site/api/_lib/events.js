@@ -11,7 +11,7 @@ import * as v from "./validate.js";
 
 const EVENT_COLUMNS = [
   "id", "code", "title", "button_label", "button_color", "note_label",
-  "allow_p2p", "allow_location", "allow_tap", "host_lat", "host_lng", "host_accuracy_m",
+  "allow_p2p", "allow_location", "allow_tap", "allow_bluetooth", "host_lat", "host_lng", "host_accuracy_m",
   "radius_m", "password_hash", "paused", "created_at", "ended_at",
 ].join(",");
 
@@ -44,6 +44,7 @@ export function publicEvent(row) {
     allowP2p: row.allow_p2p,
     allowLocation: row.allow_location,
     allowTap: row.allow_tap,
+    allowBluetooth: row.allow_bluetooth,
     hasLocation: row.host_lat !== null,
     radius: row.radius_m,
     paused: row.paused,
@@ -155,6 +156,7 @@ export function eventSettings(body, current = null) {
   if (has("allowP2p")) columns.allow_p2p = body.allowP2p === undefined ? creating : v.bool(body.allowP2p);
   if (has("allowLocation")) columns.allow_location = v.bool(body.allowLocation);
   if (has("allowTap")) columns.allow_tap = v.bool(body.allowTap);
+  if (has("allowBluetooth")) columns.allow_bluetooth = v.bool(body.allowBluetooth);
   if (has("radius")) columns.radius_m = v.radius(body.radius ?? 100);
 
   if (body.location) {
@@ -165,7 +167,7 @@ export function eventSettings(body, current = null) {
   }
 
   const merged = { ...(current ?? {}), ...columns };
-  if (!merged.allow_p2p && !merged.allow_location && !merged.allow_tap) {
+  if (!merged.allow_p2p && !merged.allow_location && !merged.allow_tap && !merged.allow_bluetooth) {
     throw new HttpError(422, "Pick at least one way for people to check in.", "invalid");
   }
   if (merged.allow_location && (merged.host_lat === null || merged.host_lat === undefined)) {

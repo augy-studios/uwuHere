@@ -19,7 +19,8 @@
 // (TapService.java, api/_lib/tap.js). So does checking in with no internet:
 // the app makes this phone a wifi hotspot serving a check-in page of its own
 // (Hotspot.java), and its check-ins come here to be recorded like same-wifi
-// ones.
+// ones. And so does Bluetooth: attendees who have the app check in phone to
+// phone over Nearby Connections (Mesh.java), recorded here the same way.
 
 import { bootShell } from "./shell.js";
 import { postJson } from "./api.js";
@@ -64,6 +65,11 @@ let wakeLock = null;
 // "unsupported" or "error".
 let tapState = "idle";
 let tapWanted = false;
+// What the app last said about Bluetooth check-in (Mesh.java): "idle",
+// "ready", "needs-permission", "denied", "bt-off", "unsupported" or "failed".
+let btState = "idle";
+let btWanted = false;
+
 // Whether the app has said what it can do yet (AppBridge.ready, at boot).
 let bridgeHeard = !AppBridge.native;
 
@@ -125,6 +131,7 @@ function applySnapshot(snapshot, { fromCache = false } = {}) {
   render();
   syncP2p();
   syncTap();
+  syncBluetooth();
 }
 
 function persist() {
@@ -144,6 +151,7 @@ function loseAccess() {
   store.forgetHosted(code);
   stopP2p();
   syncTap();
+  syncBluetooth();
   showLocked("This browser can no longer manage this event. Enter its password to open it.");
 }
 
@@ -153,6 +161,7 @@ function eventGone() {
   stopP2p();
   event = null;
   syncTap();
+  syncBluetooth();
   showMissing(
     "This event is gone",
     `Events are deleted ${store.PURGE_AFTER_END_DAYS} days after they end, or ${store.PURGE_UNENDED_DAYS} days after they were made if nobody ends them.`
@@ -246,6 +255,7 @@ const METHOD = {
   manual: { icon: "hand", label: "Added by hand" },
   tap: { icon: "tap", label: "Tapped phones" },
   tap_late: { icon: "tap", label: "Tapped, sent later" },
+  mesh: { icon: "bluetooth", label: "Bluetooth" },
   hotspot: { icon: "hotspot", label: "Host's hotspot" },
 };
 
@@ -316,6 +326,7 @@ function render() {
   renderSync();
   renderP2p();
   renderTap();
+  renderBluetooth();
   renderHotspot();
 }
 
@@ -639,6 +650,106 @@ window.addEventListener("pagehide", () => {
 });
 
 /* -------------------------------------------------------------------------
+ * Bluetooth: in the app, attendees' apps check in phone to phone
+ * ---------------------------------------------------------------------- */
+
+function wantBluetooth() {
+  return Boolean(event && event.allowBluetooth && !event.ended && hostKey && AppBridge.has("mesh"));
+}
+
+// Advertises this event to attendees' apps, or stops. Without `ask` it never
+// shows a permission prompt by itself: it says "needs-permission", and the
+// row's button asks.
+async function syncBluetooth({ force = false, ask = false } = {}) {
+  const want = wantBluetooth();
+  if (want === btWanted && !force && !ask) return;
+  btWanted = want;
+  try {
+    const answer = await AppBridge.call("Here", "bluetooth", want ? { on: true, code, ask } : { on: false });
+    btState = answer?.state || "idle";
+    if (btState === "failed") btState = { failed: answer.message };
+  } catch {
+    btState = want ? { failed: "" } : "idle";
+  }
+  renderBluetooth();
+  updateWakeLock();
+}
+
+function renderBluetooth() {
+  const row = $("btRow");
+  row.hidden = !event || !event.allowBluetooth || event.ended;
+  if (row.hidden) return;
+
+  const dot = $("btDot");
+  const action = $("btAction");
+  dot.className = "status-dot";
+  action.hidden = true;
+  const offer = (label, what) => {
+    action.textContent = label;
+    action.dataset.do = what;
+    action.hidden = false;
+  };
+  let text;
+
+  if (!bridgeHeard) {
+    text = "Starting Bluetooth check-in.";
+  } else if (!AppBridge.native) {
+    dot.classList.add("warn");
+    text = "Bluetooth check-in works with this event open in the uwuHere app on Android.";
+  } else if (!AppBridge.has("mesh")) {
+    dot.classList.add("error");
+    text = AppBridge.has("hotspot")
+      ? "This phone has no Google Play services, which Bluetooth check-in needs."
+      : "Update the uwuHere app to take Bluetooth check-ins.";
+  } else if (btState === "ready") {
+    dot.classList.add("ok");
+    text = "Ready for Bluetooth. Attendees with the uwuHere app check in phone to phone. Keep this page open.";
+  } else if (btState === "needs-permission") {
+    dot.classList.add("warn");
+    text = "Bluetooth check-in needs \"Nearby devices\" on this phone.";
+    offer("Allow", "ask");
+  } else if (btState === "denied") {
+    dot.classList.add("error");
+    text = "\"Nearby devices\" isn't allowed for uwuHere. Allow it in the app's settings.";
+    offer("Settings", "app");
+  } else if (btState === "bt-off") {
+    dot.classList.add("warn");
+    text = "Bluetooth is off on this phone. Turn it on to take Bluetooth check-ins.";
+    offer("Turn on", "bluetooth");
+  } else if (typeof btState === "object") {
+    dot.classList.add("error");
+    text = btState.failed || "Bluetooth check-in didn't start.";
+    offer("Retry", "retry");
+  } else {
+    text = "Starting Bluetooth check-in.";
+  }
+  $("btText").textContent = text;
+}
+
+$("btAction").addEventListener("click", () => {
+  const what = $("btAction").dataset.do;
+  if (what === "ask") syncBluetooth({ ask: true });
+  else if (what === "app" || what === "bluetooth") AppBridge.call("Here", "openSettings", { what }).catch(() => {});
+  else syncBluetooth({ force: true });
+});
+
+// A check-in from an attendee's app, waiting on this answer.
+AppBridge.listen("Here", "meshCheckin", async (data) => {
+  const answer = await takeCheckin(data, "mesh");
+  AppBridge.call("Here", "meshAnswer", {
+    id: data.id,
+    ok: answer.type === "checked-in",
+    at: answer.at || null,
+    message: answer.message || null,
+  }).catch(() => {});
+});
+
+// Leaving this page, inside the app, stops advertising.
+window.addEventListener("pagehide", () => {
+  if (btWanted) AppBridge.call("Here", "bluetooth", { on: false }).catch(() => {});
+});
+
+/* -------------------------------------------------------------------------
  * No internet: in the app, this phone is the attendees' wifi
  * ---------------------------------------------------------------------- */
 
@@ -767,6 +878,7 @@ async function updateWakeLock() {
   const want =
     ((host && (p2p.status === "waiting" || p2p.status === "connected")) ||
       tapState === "ready" ||
+      btState === "ready" ||
       hotspot.status === "on") &&
     document.visibilityState === "visible";
 
@@ -979,7 +1091,7 @@ $("endConfirm").addEventListener("click", async () => {
 
 /* ---- settings ---- */
 
-const settingsMethods = { p2p: true, location: false, tap: false };
+const settingsMethods = { p2p: true, location: false, tap: false, bluetooth: false };
 let newSpot = null;
 
 function bindCounter(inputId, countId, max) {
@@ -1039,6 +1151,7 @@ $("settingsBtn").addEventListener("click", () => {
   settingsMethods.p2p = event.allowP2p;
   settingsMethods.location = event.allowLocation;
   settingsMethods.tap = event.allowTap;
+  settingsMethods.bluetooth = event.allowBluetooth;
   newSpot = null;
   $("sUseHere").setAttribute("aria-pressed", "false");
   $("sUseHereText").textContent = event.hasLocation ? "Move the spot to where I am now" : "Set the spot to where I am now";
@@ -1079,7 +1192,7 @@ $("settingsForm").addEventListener("submit", async (e) => {
 
   const buttonLabel = $("sButtonLabel").value.trim();
   if (!buttonLabel) return fail("The button needs some text.");
-  if (!settingsMethods.p2p && !settingsMethods.location && !settingsMethods.tap) {
+  if (!settingsMethods.p2p && !settingsMethods.location && !settingsMethods.tap && !settingsMethods.bluetooth) {
     return fail("Pick at least one way for people to check in.");
   }
   if (settingsMethods.location && !event.hasLocation && !newSpot && !(await takeSpot())) return;
@@ -1092,6 +1205,7 @@ $("settingsForm").addEventListener("submit", async (e) => {
     allowP2p: settingsMethods.p2p,
     allowLocation: settingsMethods.location,
     allowTap: settingsMethods.tap,
+    allowBluetooth: settingsMethods.bluetooth,
     radius: Number($("sRadius").value),
   };
   if (newSpot) settings.location = newSpot;
@@ -1180,6 +1294,8 @@ document.addEventListener("visibilitychange", () => {
   // A phone that slept may have lost its peer.
   if (wantP2p() && (p2p.status === "error" || p2p.status === "idle")) restartP2p();
   syncTap({ force: true });
+  // Bluetooth may have been switched on, or allowed, meanwhile.
+  syncBluetooth({ force: true });
   updateWakeLock();
 });
 
@@ -1201,6 +1317,8 @@ if (AppBridge.native) {
     bridgeHeard = true;
     syncTap();
     renderTap();
+    syncBluetooth();
+    renderBluetooth();
     renderHotspot();
     updateWakeLock();
   });

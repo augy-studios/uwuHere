@@ -43,8 +43,16 @@ Android, a join page that's already open reads the tap itself (Web NFC);
 elsewhere the tap opens a new tab, which checks in by itself with the name
 already typed, and the first tab follows.
 
+**Bluetooth.** For attendees who have the uwuHere app on Android: their phone
+and the host's, both in the app, talk directly over Google's Nearby
+Connections (`Mesh.java`), with no internet needed on either. The host page
+records each one like a same-wifi check-in ("Bluetooth" in the list). In a
+browser the method isn't offered, so an event that takes Bluetooth only needs
+another way on for everyone without the app; the home page says so.
+
 With more than one on, the attendee page tries a tap first, if it has one,
-then same wifi, since it needs no permission prompt, then location.
+then Bluetooth in the app, then same wifi, since it needs no permission
+prompt, then location.
 
 **With no internet.** Two more ways, both in the Android app, are in
 `../android/OFFLINE-CHECKIN.md`. A tap made with no connection is kept in the
@@ -128,7 +136,7 @@ api/                 Vercel functions, see below
 | `GET /api/event?code=` | What the attendee page needs. With `X-Uwuhere-Device`, also whether this browser is checked in. |
 | `POST /api/checkin` | Check in by location, or with a tap's token (`late` for one kept offline). |
 | `POST /api/leave` | I'm leaving early. |
-| `POST /api/host` | Everything the host does, by `action`: get, record (same wifi or the app's hotspot), add, remove, pause, resume, update, password, end. |
+| `POST /api/host` | Everything the host does, by `action`: get, record (same wifi, the app's hotspot, or Bluetooth app to app), add, remove, pause, resume, update, password, end. |
 | `POST /api/unlock` | Password to host key, for another device. |
 | `GET /api/cron/purge` | The daily purge, run by Vercel Cron with `CRON_SECRET`. |
 | `GET /api/app-release` | The Android app's newest release on GitHub, for its updater. Cached at the edge for 10 minutes. |
@@ -233,6 +241,22 @@ Needs the host's page open in the Android app, on a phone with NFC.
 - An attendee who has opened uwuHere before, in airplane mode: tap, and the
   page says "Tapped, not sent yet". Back online, it's sent, and the host's list
   shows "Tapped, sent later" at the tap's time.
+
+### Checking Bluetooth by hand
+
+Needs the event open in the app on the host's phone, and the app on the
+attendee's, both with Google Play services.
+
+- Turn Bluetooth on in the event's settings. The host page says "Nearby
+  devices" is needed; **Allow** asks once, then "Ready for Bluetooth".
+- On the attendee's phone, open the join link in the app and press the button:
+  "Nearby devices" the first time, then "Looking for the host's phone by
+  Bluetooth", then checked in. "Bluetooth" on the host's list.
+- The same with both phones in airplane mode, Bluetooth on: still checked in,
+  and "Not sent yet" on the host until it's back online.
+- Bluetooth off on the host's phone: the host page says so, and "Turn on"
+  opens the Bluetooth settings.
+- The join page in a browser: Bluetooth isn't mentioned.
 
 ### Checking the hotspot by hand
 

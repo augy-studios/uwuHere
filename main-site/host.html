@@ -153,6 +153,11 @@
                         <span id="tapText"></span>
                         <button class="btn" id="tapAction" type="button" hidden></button>
                     </div>
+                    <div class="status-row" id="btRow" hidden>
+                        <span class="status-dot" id="btDot"></span>
+                        <span id="btText"></span>
+                        <button class="btn" id="btAction" type="button" hidden></button>
+                    </div>
                     <div class="status-row" id="hotspotRow" hidden>
                         <span class="status-dot" id="hotspotDot" hidden></span>
                         <span id="hotspotText"></span>
@@ -228,7 +233,7 @@
                 </label>
                 <div class="field">
                     <span class="field-head">How people prove they are here</span>
-                    <div class="toggle-grid three" id="sMethods">
+                    <div class="toggle-grid four" id="sMethods">
                         <button class="toggle-btn" type="button" data-method="p2p" aria-pressed="false">
                             <span data-icon="wifi"></span>Same wifi
                         </button>
@@ -237,6 +242,9 @@
                         </button>
                         <button class="toggle-btn" type="button" data-method="tap" aria-pressed="false">
                             <span data-icon="tap"></span>Tap phones
+                        </button>
+                        <button class="toggle-btn" type="button" data-method="bluetooth" aria-pressed="false">
+                            <span data-icon="bluetooth"></span>Bluetooth
                         </button>
                     </div>
                 </div>

@@ -21,6 +21,7 @@ itself from there.
 | **The site's own links** (`https://here.uwuapps.org/...`, verified by `.well-known/assetlinks.json`), so scanning a host's QR code with the phone's camera opens the check-in button in the app. Also `uwu://here/` links, such as `uwu://here/join?id=BCD234` | `MainActivity` | none |
 | **Location** for checking in and setting the event's spot, with Android's own permission prompt | the manifest's location permissions; Capacitor's WebView asks | `js/geo.js` (the sentence for a refusal) |
 | **Tapping phones**: the host's phone answers as an NFC tag, handing each phone that touches it the join link with a one-time token, so attendees check in with no app, in their browser. A "Phone tapped" note on the host page each time | `TapService`, `HerePlugin.tap` | `js/host.js`, `js/join.js`, `api/_lib/tap.js` |
+| **Bluetooth check-in, app to app**: an attendee who has the app checks in phone to phone with the host's, over Google's Nearby Connections, with no internet needed on either | `Mesh`, `HerePlugin.bluetooth`, `HerePlugin.meshCheckIn` | `js/host.js`, `js/join.js` |
 | **Checking in with no internet**: the host's phone becomes a wifi hotspot serving a check-in page of its own, for attendees with no signal, iPhones included. Two QR codes on the host page: join the wifi, open the page. See `OFFLINE-CHECKIN.md` | `Hotspot`, `LocalServer`, `res/raw/hotspot_page.html`, `HerePlugin.hotspot` | `js/host.js` |
 | **No status bar**, so the page has the whole screen; a swipe down from the top shows it for a moment, its icons following the page's light or dark mode, not the phone's. The user agent's `uwuHereApp/2` tells the page there's no bar to leave room for (1.0.0, `uwuHereApp/1`, still has it) | `MainActivity`, Capacitor's SystemBars | `js/app-bridge.js`, `css/app.css` (`data-statusbar`) |
 
@@ -45,7 +46,9 @@ Things the app deliberately doesn't do:
 | Notifications (`POST_NOTIFICATIONS`) | Only when you turn on a switch under the bell in the Edge Tray (Android 13 and later) | Check-ins, new versions, news |
 | Install unknown apps (`REQUEST_INSTALL_PACKAGES`) | The first update | `UpdateActivity` |
 | NFC (`NFC`) | Not asked: Android grants it at install | Tapping phones (`TapService`) |
-| Nearby devices (`NEARBY_WIFI_DEVICES`), Android 13 and later | The first time a host starts the hotspot | The hotspot (`Hotspot`). Never used to find where anyone is |
+| Nearby devices (`NEARBY_WIFI_DEVICES`), Android 13 and later | The first time a host starts the hotspot, or Bluetooth check-in | The hotspot (`Hotspot`), and Bluetooth phones moving to wifi once they've met (`Mesh`). Never used to find where anyone is |
+| Nearby devices (`BLUETOOTH_SCAN`, `BLUETOOTH_ADVERTISE`, `BLUETOOTH_CONNECT`), Android 12 and later | One prompt with the above, when a host allows Bluetooth check-in or an attendee first presses the button | Bluetooth check-in (`Mesh`) |
+| Location, Android 12 and earlier, for Bluetooth | The same moment, if not already allowed | Android wants it for finding Bluetooth devices there; on Android 11 and earlier it also has to be switched on |
 | Location, Android 8 to 12 | The same, if not already allowed for checking in by location | The hotspot: Android wants it there instead of nearby devices |
 | Wifi state (`ACCESS_WIFI_STATE`, `CHANGE_WIFI_STATE`) | Not asked: Android grants them at install | The hotspot |
 | Internet | Not asked: Android grants it | The site itself |

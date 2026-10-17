@@ -38,7 +38,7 @@ check-in works, where data lives, and what to do before a deploy.
 ## Setting it up
 
 1. **Supabase.** In the shared uwuapps project's SQL editor, run the files in
-   `migrations/` in order, `0001` to `0004`. All are safe to run twice.
+   `migrations/` in order, `0001` to `0005`. All are safe to run twice.
 2. **Vercel.** Root directory `main-site`. Set the five variables listed in
    `main-site/.env.example`. Vercel installs the one dependency (`bcryptjs`)
    from `main-site/package.json`.
@@ -57,6 +57,7 @@ check-in works, where data lives, and what to do before a deploy.
 | `0002_uwuhere_purge.sql` | `uwuhere_purge_events()`, run daily by Vercel Cron | Yes, or old events are kept forever. |
 | `0003_uwuhere_tap.sql` | Tapping phones: `allow_tap`, the `tap` method, each tap's nonce | Yes, **before** deploying the site that reads it, or every event fails to load. |
 | `0004_uwuhere_offline.sql` | The `tap_late` and `hotspot` methods, for check-ins with no internet | Yes, before deploying the site that sends them, or they're refused. |
+| `0005_uwuhere_bluetooth.sql` | `allow_bluetooth`, and the `mesh` method for Bluetooth app to app. Also allows a `bluetooth` method, left over from a Chrome Web Bluetooth design that wasn't built; nothing writes it | Yes, **before** deploying the site that reads it, or every event fails to load. |
 
 Every table is prefixed `uwuhere_`. Only the serverless functions touch them,
 with the service role key; RLS with no policy means the anon key reaches

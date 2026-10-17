@@ -35,11 +35,24 @@
  *   hotspotAnswer({ id, ok, at, message })  the page's answer to a "hotspotCheckin" { id, name,
  *                             note, deviceHash }, passed on to the attendee waiting for it.
  *                             "hotspotStopped" when Android stops the hotspot itself
+ *   bluetooth({ on, code, ask })  Bluetooth check-in, host side (Mesh): advertise this event to
+ *                             attendees' apps. { state }: "ready", "needs-permission" (call again
+ *                             with ask), "denied", "bt-off", "unsupported" (no Play services),
+ *                             "failed", or "idle" once off
+ *   meshAnswer({ id, ok, at, message })  the page's answer to a "meshCheckin" { id, name, note,
+ *                             deviceHash }, sent back to the attendee's phone
+ *   meshCheckIn({ code, name, note, deviceHash })  Bluetooth check-in, attendee side: find the
+ *                             host's phone, check in, hang up. { ok, at } or { ok: false, reason,
+ *                             message }, reason one of "denied", "bt-off", "location-off",
+ *                             "not-found", "refused", "unsupported", "failed", "timeout",
+ *                             "dropped", "busy"
  */
 package org.uwuapps.here;
 
 import android.app.Activity;
 import android.Manifest;
+import android.bluetooth.BluetoothAdapter;
+import android.bluetooth.BluetoothManager;
 import android.content.ActivityNotFoundException;
 import android.content.ComponentName;
 import android.content.ContentResolver;
@@ -88,12 +101,19 @@ import java.util.Set;
 import java.util.regex.Pattern;
 
 // The hotspot needs "nearby wifi devices" on Android 13 and later, and precise location before
-// that, which the page's own check-in by location already uses.
+// that, which the page's own check-in by location already uses. Bluetooth check-in (Mesh) needs
+// the Bluetooth ones on Android 12 and later, which share one "Nearby devices" prompt with nearby
+// wifi, and location on Android 12 and before (meshPermissions).
 @CapacitorPlugin(
         name = "Here",
         permissions = {
                 @Permission(alias = "nearbyWifi", strings = {Manifest.permission.NEARBY_WIFI_DEVICES}),
                 @Permission(alias = "location", strings = {Manifest.permission.ACCESS_FINE_LOCATION}),
+                @Permission(alias = "bluetooth", strings = {
+                        Manifest.permission.BLUETOOTH_SCAN,
+                        Manifest.permission.BLUETOOTH_ADVERTISE,
+                        Manifest.permission.BLUETOOTH_CONNECT,
+                }),
         }
 )
 public class HerePlugin extends Plugin {
@@ -110,6 +130,7 @@ public class HerePlugin extends Plugin {
     private static final Pattern HOST_KEY = Pattern.compile("[A-Za-z0-9_-]{43}");
 
     private Hotspot hotspot;
+    private Mesh mesh;
 
     @Override
     public void load() {
@@ -135,6 +156,7 @@ public class HerePlugin extends Plugin {
                 notifyListeners("hotspotStopped", new JSObject());
             }
         });
+        if (Mesh.available(getContext())) mesh = new Mesh(getContext());
     }
 
     @PluginMethod
@@ -156,6 +178,7 @@ public class HerePlugin extends Plugin {
         features.put("checkupdate"); // UpdateActivity's check, for the Edge Tray
         features.put("tap"); // TapService; tap() says if this phone has no NFC
         if (Hotspot.supported()) features.put("hotspot"); // Hotspot, Android 8 and later
+        if (mesh != null) features.put("mesh"); // Mesh: Bluetooth, app to app, with Play services
         // Firebase is set up for this build (google-services.json): notifications can come.
         if (firebaseReady()) features.put("push");
         out.put("features", features);
@@ -507,9 +530,188 @@ public class HerePlugin extends Plugin {
         call.resolve();
     }
 
+    /* ---- Bluetooth, app to app (Mesh) ---- */
+
+    // Host: advertise this event, or stop. `ask` lets it ask for the permissions; without it, an
+    // answer of "needs-permission" asks the page to offer a button that does.
+    @PluginMethod
+    public void bluetooth(PluginCall call) {
+        JSObject out = new JSObject();
+        if (!Boolean.TRUE.equals(call.getBoolean("on", false))) {
+            if (mesh != null) mesh.stopAdvertising();
+            out.put("state", "idle");
+            call.resolve(out);
+            return;
+        }
+        if (mesh == null) {
+            out.put("state", "unsupported");
+            call.resolve(out);
+            return;
+        }
+        if (!EVENT_CODE.matcher(call.getString("code", "")).matches()) {
+            call.reject("Not an event this phone hosts");
+            return;
+        }
+        if (!meshAllowed()) {
+            if (Boolean.TRUE.equals(call.getBoolean("ask", false))) {
+                requestPermissionForAliases(meshPermissions(), call, "bluetoothPermission");
+            } else {
+                out.put("state", "needs-permission");
+                call.resolve(out);
+            }
+            return;
+        }
+        startAdvertising(call);
+    }
+
+    @PermissionCallback
+    private void bluetoothPermission(PluginCall call) {
+        if (!meshAllowed()) {
+            JSObject out = new JSObject();
+            out.put("state", "denied");
+            call.resolve(out);
+            return;
+        }
+        startAdvertising(call);
+    }
+
+    private void startAdvertising(PluginCall call) {
+        JSObject out = new JSObject();
+        if (!bluetoothOn()) {
+            out.put("state", "bt-off");
+            call.resolve(out);
+            return;
+        }
+        mesh.advertise(call.getString("code"), (id, name, note, deviceHash) -> {
+            if (!hasListeners("meshCheckin")) return false;
+            JSObject data = new JSObject();
+            data.put("id", id);
+            data.put("name", name);
+            data.put("note", note);
+            data.put("deviceHash", deviceHash);
+            notifyListeners("meshCheckin", data);
+            return true;
+        }, new Mesh.Started() {
+            @Override
+            public void started() {
+                out.put("state", "ready");
+                call.resolve(out);
+            }
+
+            @Override
+            public void failed(String message) {
+                out.put("state", "failed");
+                out.put("message", message);
+                call.resolve(out);
+            }
+        });
+    }
+
+    @PluginMethod
+    public void meshAnswer(PluginCall call) {
+        if (mesh != null) {
+            mesh.answer(call.getString("id", ""), Boolean.TRUE.equals(call.getBoolean("ok", false)),
+                    call.getString("at"), call.getString("message"));
+        }
+        call.resolve();
+    }
+
+    // Attendee: { ok, at } or { ok: false, reason, message }. Asks for the permissions the first
+    // time, as the attendee has just pressed the button.
+    @PluginMethod
+    public void meshCheckIn(PluginCall call) {
+        if (mesh == null) {
+            meshFailed(call, "unsupported", "This phone has no Google Play services, which Bluetooth check-in needs.");
+            return;
+        }
+        if (!EVENT_CODE.matcher(call.getString("code", "")).matches()) {
+            call.reject("Not an event code");
+            return;
+        }
+        if (!meshAllowed()) {
+            requestPermissionForAliases(meshPermissions(), call, "meshCheckInPermission");
+            return;
+        }
+        meshCheckInAllowed(call);
+    }
+
+    @PermissionCallback
+    private void meshCheckInPermission(PluginCall call) {
+        if (!meshAllowed()) {
+            meshFailed(call, "denied", "uwuHere needs \"Nearby devices\" to check in by Bluetooth. Allow it in the app's settings.");
+            return;
+        }
+        meshCheckInAllowed(call);
+    }
+
+    private void meshCheckInAllowed(PluginCall call) {
+        if (!bluetoothOn()) {
+            meshFailed(call, "bt-off", "Turn on Bluetooth to check in phone to phone.");
+            return;
+        }
+        // Before Android 12, looking for Bluetooth devices also needs location switched on.
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+            LocationManager lm = (LocationManager) getContext().getSystemService(Context.LOCATION_SERVICE);
+            if (lm == null || !LocationManagerCompat.isLocationEnabled(lm)) {
+                meshFailed(call, "location-off", "Turn on location in this phone's settings to check in by Bluetooth.");
+                return;
+            }
+        }
+        org.json.JSONObject message = new org.json.JSONObject();
+        try {
+            message.put("v", 1);
+            message.put("type", "checkin");
+            message.put("code", call.getString("code"));
+            message.put("name", call.getString("name", ""));
+            String note = call.getString("note");
+            message.put("note", note == null || note.isEmpty() ? org.json.JSONObject.NULL : note);
+            message.put("deviceHash", call.getString("deviceHash", ""));
+        } catch (org.json.JSONException e) {
+            call.reject("That check-in couldn't be made");
+            return;
+        }
+        mesh.checkIn(call.getString("code"), message, (ok, at, reason, text) -> {
+            JSObject out = new JSObject();
+            out.put("ok", ok);
+            if (at != null) out.put("at", at);
+            if (reason != null) out.put("reason", reason);
+            if (text != null) out.put("message", text);
+            call.resolve(out);
+        });
+    }
+
+    private static void meshFailed(PluginCall call, String reason, String message) {
+        JSObject out = new JSObject();
+        out.put("ok", false);
+        out.put("reason", reason);
+        out.put("message", message);
+        call.resolve(out);
+    }
+
+    // What Nearby Connections needs, by Android version.
+    private static String[] meshPermissions() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) return new String[] {"bluetooth", "nearbyWifi"};
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) return new String[] {"bluetooth", "location"};
+        return new String[] {"location"};
+    }
+
+    private boolean meshAllowed() {
+        for (String alias : meshPermissions()) {
+            if (getPermissionState(alias) != PermissionState.GRANTED) return false;
+        }
+        return true;
+    }
+
+    private boolean bluetoothOn() {
+        BluetoothManager bm = (BluetoothManager) getContext().getSystemService(Context.BLUETOOTH_SERVICE);
+        BluetoothAdapter adapter = bm == null ? null : bm.getAdapter();
+        return adapter != null && adapter.isEnabled();
+    }
+
     @Override
     protected void handleOnDestroy() {
         hotspot.stop();
+        if (mesh != null) mesh.stopAdvertising();
         super.handleOnDestroy();
     }
 
@@ -534,6 +736,8 @@ public class HerePlugin extends Plugin {
             intent = new Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, pkg);
         } else if ("nfc".equals(what)) {
             intent = new Intent(Settings.ACTION_NFC_SETTINGS);
+        } else if ("bluetooth".equals(what)) {
+            intent = new Intent(Settings.ACTION_BLUETOOTH_SETTINGS);
         } else {
             intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", pkg, null));
         }

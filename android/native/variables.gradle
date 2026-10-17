@@ -16,4 +16,8 @@ ext {
     // The same Firebase Messaging the push plugin builds with (it reads this too), for
     // HerePlugin's topic subscriptions.
     firebaseMessagingVersion = '25.0.1'
+    // Google's Nearby Connections, for Bluetooth check-in from app to app (Mesh.java). Held at
+    // 19.3.0: 19.5 is built with Kotlin 2.4, newer than this build's Kotlin reads, and 19.4 needs
+    // core library desugaring.
+    playServicesNearbyVersion = '19.3.0'
 }

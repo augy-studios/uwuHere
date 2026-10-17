@@ -311,9 +311,13 @@ main, .brand {
   grid-template-columns: repeat(2, 1fr);
   gap: 6px;
 }
-/* Three across, icon over the words, so "Tap phones" fits a phone's width. */
-.toggle-grid.three { grid-template-columns: repeat(3, 1fr); }
-.toggle-grid.three .toggle-btn { flex-direction: column; gap: 4px; padding: 10px 6px; text-align: center; }
+/* The ways to check in: four across, icon over the words, two by two on a
+   phone so "Tap phones" fits. */
+.toggle-grid.four { grid-template-columns: repeat(4, 1fr); }
+.toggle-grid.four .toggle-btn { flex-direction: column; gap: 4px; padding: 10px 6px; text-align: center; }
+@media (max-width: 480px) {
+  .toggle-grid.four { grid-template-columns: repeat(2, 1fr); }
+}
 .toggle-btn {
   display: flex;
   align-items: center;

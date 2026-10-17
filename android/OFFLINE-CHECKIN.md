@@ -10,6 +10,7 @@ from a browser, iPhones included.
 |---|---|---|
 | **Tapping phones** | Works. The host's phone signs each tap's token itself (`TapService.java`) | Works for anyone who has opened uwuHere before: the tap is kept and sent later (below) |
 | **The host's hotspot** | Works. That's what it's for | Works, for everyone (below) |
+| **Bluetooth, app to app** | Works | Works, for attendees with the app (below) |
 | **Location** | Works. The server checks the distance | Fails |
 | **Same wifi** | Fails. The PeerJS broker introduces the two devices | Fails |
 | **Added by hand** | Works. Kept in the host page's outbox and sent later | Not involved |
@@ -44,6 +45,15 @@ wifi and one to open the page, which iPhone and Android cameras both read.
 - **On the host's phone**, Android may turn its own wifi off while the hotspot
   is on, if the phone can't do both. Mobile data, if there is any, stays.
 
+## Bluetooth, app to app
+
+For attendees who have the uwuHere app: their phone finds the host's over
+Google's Nearby Connections and checks in directly (`Mesh.java`), with no
+internet needed on either phone. The host page records it the same way as a
+hotspot check-in. It needs Google Play services on both phones and one "Nearby
+devices" prompt on each. The event has to have Bluetooth turned on in its
+settings.
+
 ## Taps kept for later
 
 An attendee who taps the host's phone with no connection keeps the tap: the join
@@ -60,11 +70,7 @@ also be sent late; the host can see it.
 
 ## Not built, and why
 
-- **A phone-to-phone mesh** (Nearby Connections, Wi-Fi Direct, Bluetooth mesh).
-  Every one of these needs native code on the attendee's phone. A browser can't
-  join any of them, and attendees use a browser.
-- **Bluetooth from the browser** (Web Bluetooth). iPhone Safari has none. Chrome
-  on Android shows a device picker on every connection that the page can't skip.
-  The host's app would need two more runtime prompts, and the join page still
-  has to load first, which it can't for a first-time visitor with no connection.
-  The hotspot already reaches all of these people, and more.
+- **Bluetooth from the browser** (Web Bluetooth). Android-specific check-in is
+  for attendees with the app, which Bluetooth app to app already covers. In a
+  browser, iPhone Safari has none, and Chrome shows a device picker on every
+  connection that the page can't skip.

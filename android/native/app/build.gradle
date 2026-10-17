@@ -55,6 +55,8 @@ dependencies {
     implementation project(':capacitor-android')
     // Not Capacitor's: HerePlugin's topic subscriptions (check-ins, releases, news).
     implementation "com.google.firebase:firebase-messaging:$firebaseMessagingVersion"
+    // Not Capacitor's: Bluetooth check-in from app to app (Mesh).
+    implementation "com.google.android.gms:play-services-nearby:$playServicesNearbyVersion"
     implementation project(':capacitor-cordova-android-plugins')
 }
 
