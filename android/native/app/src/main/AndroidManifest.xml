@@ -24,6 +24,7 @@
          (TapService.java). Granted at install, never asked. A phone without NFC still installs
          the app, and the host page says it can't take taps. -->
     <uses-permission android:name="android.permission.NFC" />
+    <uses-feature android:name="android.hardware.nfc" android:required="false" />
     <uses-feature android:name="android.hardware.nfc.hce" android:required="false" />
 
     <!-- Checking in with no internet: this phone's own wifi hotspot, serving a check-in page
@@ -94,6 +95,22 @@
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="uwu" android:host="here" />
+            </intent-filter>
+
+            <!-- NFC tags holding the site's links or uwu://here/ ones: a host's phone answering as
+                 a tag (TapService), or a sticker. With this Android counts the app as one that
+                 opens NFC tags, lists it under its NFC settings ("Launch via NFC"), and opens a
+                 tap straight in the app rather than the browser. Only these links, never every
+                 tag. Phones without the app still open the link in their browser. -->
+            <intent-filter>
+                <action android:name="android.nfc.action.NDEF_DISCOVERED" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="https" android:host="here.uwuapps.org" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.nfc.action.NDEF_DISCOVERED" />
+                <category android:name="android.intent.category.DEFAULT" />
                 <data android:scheme="uwu" android:host="here" />
             </intent-filter>
         </activity>

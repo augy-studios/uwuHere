@@ -8,8 +8,8 @@
  *                      you've turned on
  *   PushNotifications  Capacitor's, for Android's notification permission and the pushes
  *
- * Here: what the app was opened with (one of the site's own links, such as a scanned QR code, a
- * uwu://here/ link, or a tapped notification) opened in the page, the back button going back
+ * Here: what the app was opened with (one of the site's own links, such as a scanned QR code or
+ * an NFC tap, a uwu://here/ link, or a tapped notification) opened in the page, the back button going back
  * through the page's history, the notification channels, and no status bar.
  */
 package org.uwuapps.here;

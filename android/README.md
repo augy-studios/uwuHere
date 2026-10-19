@@ -20,7 +20,7 @@ itself from there.
 | **Notifications**, opt-in from the bell in the Edge Tray: check-ins by location and early leavers at your events, new versions of the app (pushed the moment a release is published), and news you send from the Firebase console | `HerePlugin.setTopic`, `HerePlugin.watchEvent` (FCM topics), `Notifications`, Capacitor's PushNotifications | `js/app-notify.js`, `api/_lib/alerts.js`, `api/push/release.js`, `api/_lib/fcm.js` |
 | **The site's own links** (`https://here.uwuapps.org/...`, verified by `.well-known/assetlinks.json`), so scanning a host's QR code with the phone's camera opens the check-in button in the app. Also `uwu://here/` links, such as `uwu://here/join?id=BCD234` | `MainActivity` | none |
 | **Location** for checking in and setting the event's spot, with Android's own permission prompt | the manifest's location permissions; Capacitor's WebView asks | `js/geo.js` (the sentence for a refusal) |
-| **Tapping phones**: the host's phone answers as an NFC tag, handing each phone that touches it the join link with a one-time token, so attendees check in with no app, in their browser. A "Phone tapped" note on the host page each time | `TapService`, `HerePlugin.tap` | `js/host.js`, `js/join.js`, `api/_lib/tap.js` |
+| **Tapping phones**: the host's phone answers as an NFC tag, handing each phone that touches it the join link with a one-time token, so attendees check in with no app, in their browser. A "Phone tapped" note on the host page each time. An attendee who has the app gets it in the app instead: Android counts it as an app that opens NFC tags, for the site's links and `uwu://here/` ones only | `TapService`, `HerePlugin.tap`, `MainActivity` (the manifest's `NDEF_DISCOVERED`) | `js/host.js`, `js/join.js`, `api/_lib/tap.js` |
 | **Bluetooth check-in, app to app**: an attendee who has the app checks in phone to phone with the host's, over Google's Nearby Connections, with no internet needed on either | `Mesh`, `HerePlugin.bluetooth`, `HerePlugin.meshCheckIn` | `js/host.js`, `js/join.js` |
 | **Checking in with no internet**: the host's phone becomes a wifi hotspot serving a check-in page of its own, for attendees with no signal, iPhones included. Two QR codes on the host page: join the wifi, open the page. See `OFFLINE-CHECKIN.md` | `Hotspot`, `LocalServer`, `res/raw/hotspot_page.html`, `HerePlugin.hotspot` | `js/host.js` |
 | **Home screen widgets**. "Your event": the event this phone is hosting, with how many are here, how many left early, who checked in last and its code; tapping it opens the host page. It refreshes from its own button and every 15 minutes while the event is on, with the app closed. "Check in": two buttons, **Check in** (the home page's code box) and **Host** (its new event form) | `EventWidget`, `WidgetData`, `WidgetWorker`, `ShortcutWidget`, `HerePlugin.widget` | `js/app-widget.js`, `js/host.js`, `js/home.js` (`/#join`, `/#host`) |
@@ -109,8 +109,8 @@ Android SDK (`ANDROID_HOME`, the one Bubblewrap left in `~/.bubblewrap`, or Andr
 **For a new version**, raise both of these in `native/app/build.gradle` first:
 
 ```groovy
-versionCode 3          // a whole number, one higher each release: phones only update to a higher one
-versionName "1.0.2"    // what people see, and the release folder's name
+versionCode 4          // a whole number, one higher each release: phones only update to a higher one
+versionName "1.0.3"    // what people see, and the release folder's name
 ```
 
 If `release/<version>/` already has an APK, the script warns and replaces it.
@@ -168,6 +168,9 @@ On a phone with the app installed:
   from the Files app.
 - **Links**: scan the QR code with the phone's camera. It opens the check-in button in the app,
   not the browser. If it opens the browser, `assetlinks.json` isn't deployed with this key yet.
+- **NFC**: Android's settings list uwuHere under "Launch via NFC" (Settings, Apps, Special app
+  access, on Android 15 and later). Touch the phone to a host's phone that's taking taps: the
+  join page opens in the app, not the browser.
 - **Location**: check in by location. Android asks for location once; refuse it, and the page
   says to allow it in Android's settings.
 - **Updates**: the Edge Tray's circled download button says you have the newest version.
