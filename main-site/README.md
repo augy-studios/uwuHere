@@ -13,6 +13,7 @@ For the repository as a whole, setup, and the migrations, see the
 | `/` | `index.html` | Anyone: join by code, make an event, see the events this browser hosts |
 | `/host?id=CODE` | `host.html` | The host: code, QR, live list, settings, End event |
 | `/join?id=CODE` | `join.html` | Attendees: the big button, and "I'm leaving early" under it |
+| `/privacy` | `privacy.html` | What's kept, where it goes, and when it's deleted (Google Play links it) |
 
 `cleanUrls` in `vercel.json` serves each page without its `.html`.
 
@@ -55,7 +56,7 @@ then Bluetooth in the app, then same wifi, since it needs no permission
 prompt, then location.
 
 **With no internet.** Two more ways, both in the Android app, are in
-`../android/OFFLINE-CHECKIN.md`. A tap made with no connection is kept in the
+`../flutter/README.md` (the hotspot and held taps). A tap made with no connection is kept in the
 attendee's browser and sent later, recorded at the tap's time as "Tapped, sent
 later". And the host's phone can be a wifi hotspot serving a check-in page of
 its own, which any phone can join, with check-ins recorded by the host page like
@@ -118,11 +119,15 @@ js/colour-picker.js  the button colour's wheel, brightness and hex code box
 js/geo.js            one Geolocation reading, with sentences for failures
 js/qr.js             QR encoder, so the code works offline (from uwuPromptr)
 js/icons.js, ui.js   inline SVG icons; modals, toasts, small helpers
-js/app-bridge.js     the channel to the Android app (../android), when open in it;
+js/app-bridge.js     the channel to the 1.0.x Android app (Capacitor), when open in it;
                      says which app builds hide the status bar
 js/app-update.js     the app's own update check, and the tray's "Check for updates"
 js/app-notify.js     the app's notifications bell, and each event's check-in alerts
 js/app-widget.js     the app's "Your event" home screen widget, told what the host page has
+js/bug-report.js     Report a bug: the form, Screenshot a page (the whole page), sent to Telegram
+js/tour.js           first-visit tours (page-tour-spec.md), and the Edge Tray's Show me around
+vendor/              html-to-image, loaded when Screenshot a page is used
+privacy.html, .css   the Privacy page
 sw.js                service worker: caches the shell, waits to update
 check-precache.js    checks sw.js's list against what is on disk
 api/                 Vercel functions, see below
@@ -140,7 +145,8 @@ api/                 Vercel functions, see below
 | `POST /api/host` | Everything the host does, by `action`: get, record (same wifi, the app's hotspot, or Bluetooth app to app), add, remove, pause, resume, update, password, end. |
 | `POST /api/unlock` | Password to host key, for another device. |
 | `GET /api/cron/purge` | The daily purge, run by Vercel Cron with `CRON_SECRET`. |
-| `GET /api/app-release` | The Android app's newest release on GitHub, for its updater. Cached at the edge for 10 minutes. |
+| `GET /api/app-release` | The Android app's newest release on GitHub, and every one before it, for its updater and Updates page. Cached at the edge for 10 minutes. |
+| `POST /api/bug-report` | Report a bug, from the site and the apps: sent on to a Telegram bot, answered with the report's ID. |
 | `POST /api/push/release` | GitHub's webhook for a published release: tells the app's phones a new version is out. |
 
 Every answer is `{ ok: true, data }` or `{ ok: false, error, reason }`, sent
@@ -163,11 +169,14 @@ Five variables run the site, all server side, documented in `.env.example`:
 events exist. Changing the host secret also renames every event's check-in
 notification topic, so hosts reopen their pages to get them again.
 
-Three more, all optional, are for the Android app (`../android/FIREBASE-SETUP.md`):
-`FIREBASE_SERVICE_ACCOUNT`, `GITHUB_WEBHOOK_SECRET`, `GITHUB_TOKEN`.
+Three more, all optional, are for the apps (`../flutter/FIREBASE-SETUP.md`):
+`FIREBASE_SERVICE_ACCOUNT`, `GITHUB_WEBHOOK_SECRET`, `GITHUB_TOKEN`. Two more run Report a bug
+(`../BUG-REPORT-SETUP.md`): `BUG_REPORT_BOT_TOKEN` and `BUG_REPORT_CHAT_ID`, with optional
+Redis for its hourly limits.
 
 One public ID is written into each page's `<head>`, as in the template:
-`G-FMCYFTFPEL` (Google Analytics). There are no ads.
+`G-FMCYFTFPEL` (Google Analytics), on the website only: the apps have no analytics. There are no
+ads anywhere.
 
 ## Theme
 
@@ -208,7 +217,8 @@ bump, and the bar can only be seen by bumping `VERSION`.
 
 In the Android app the same bar also announces a new version of the app
 itself (`js/app-update.js`); the site's own new version takes precedence, and
-the app's shows after the reload. `../android/README.md` has the app's checks.
+the app's shows after the reload. That bar is the 1.0.x Capacitor app's; the 2.0 apps have their
+own (`../flutter/`).
 
 ### Checking check-in by hand
 

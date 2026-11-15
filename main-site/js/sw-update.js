@@ -73,7 +73,7 @@ function render() {
   bar.querySelector("[data-sw-update]").addEventListener("click", () => {
     if (kind === "app") {
       // The app's update window downloads it, checks it, and opens Android's
-      // own installer (android/.../UpdateActivity.java).
+      // own installer (the 1.0.x app's UpdateActivity; 2.0 has its Updates page).
       AppBridge.call("Here", "update", { check: false, version: appUpdate.version }).catch(() => {});
       return;
     }

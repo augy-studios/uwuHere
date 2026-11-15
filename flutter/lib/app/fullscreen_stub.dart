@@ -1,0 +1,1 @@
+void browserFullscreen(bool on) {}

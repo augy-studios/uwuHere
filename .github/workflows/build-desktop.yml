@@ -1,0 +1,247 @@
+# Builds the desktop apps (flutter/) for Windows, macOS and Linux on GitHub's machines, each on its
+# own system and processor (docs/flutter-desktop-app-spec.md §11), and puts the installers and
+# update files on the release (release/README.md).
+#
+# - A release published: built from its tag and added to it, beside the APK, unless it has its
+#   update files already.
+# - Run by hand (Actions > Build desktop apps > Run workflow) with a release's tag, such as
+#   android-v2.0.0: the installers are added to that release, replacing any of the same name; with
+#   no release of that tag yet, a draft is made for them. With the tag left empty, they're kept
+#   on the run, under Artifacts, for 30 days, to try a build.
+#
+# None is signed with a paid certificate: Windows SmartScreen warns once, and macOS needs
+# right-click > Open the first time (release/README.md).
+#
+# The installers keep the same names and identities from version to version (flutter/installers/),
+# so each version's updater, reading the latest*.yml files, installs the next over it.
+name: Build desktop apps
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "A release's tag to add the installers to, such as android-v2.0.0 (a draft release is made if there's none). Empty: only keep them on the run."
+        required: false
+        default: ''
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-desktop-${{ github.event.release.tag_name || inputs.release_tag || github.ref }}
+  cancel-in-progress: true
+
+env:
+  FLUTTER_VERSION: 3.47.9
+  RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    outputs:
+      build: ${{ steps.check.outputs.build }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - id: check
+        run: |
+          if [ -z "$RELEASE_TAG" ]; then
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          elif [ "$GITHUB_EVENT_NAME" = release ]; then
+            assets="$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')"
+            missing=false
+            for f in latest.yml latest-mac.yml latest-linux.yml; do
+              grep -qx "$f" <<< "$assets" || missing=true
+            done
+            echo "build=$missing" >> "$GITHUB_OUTPUT"
+          else
+            echo "build=true" >> "$GITHUB_OUTPUT"
+            if ! gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+              version="${RELEASE_TAG#android-v}"
+              gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft --target "$GITHUB_SHA" \
+                --title "uwuHere $version" \
+                --notes "The desktop installers for $version, built by GitHub Actions. Add the APK, write what's new, then publish."
+            fi
+          fi
+
+  # The app for each system and processor, tested once, kept as an artifact for packaging.
+  build:
+    needs: release
+    if: needs.release.outputs.build == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: windows-x64, os: windows-latest }
+          - { name: windows-arm64, os: windows-11-arm }
+          - { name: macos, os: macos-latest }
+          # 24.04, as arm64: its older glibc suits more Linux installs, and ubuntu-latest's 26.04
+          # compiler has stopped plugins' C code before (-Werror).
+          - { name: linux-x64, os: ubuntu-24.04, arch: amd64 }
+          - { name: linux-arm64, os: ubuntu-24.04-arm, arch: arm64 }
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name || github.ref }}
+
+      # Flutter at a pinned version, from its own repository: the same way on every system and
+      # processor (it fetches the Dart SDK for the machine it's on).
+      - name: Flutter ${{ env.FLUTTER_VERSION }}
+        run: |
+          git clone --depth 1 --branch "$FLUTTER_VERSION" https://github.com/flutter/flutter.git "$RUNNER_TEMP/flutter"
+          echo "$RUNNER_TEMP/flutter/bin" >> "$GITHUB_PATH"
+
+      - name: Linux packages
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libstdc++-12-dev \
+            libayatana-appindicator3-dev rpm file libfuse2 imagemagick
+
+      - name: Version
+        id: v
+        working-directory: flutter
+        run: echo "version=$(grep -E '^version:' pubspec.yaml | sed -E 's/version:[[:space:]]*([0-9.]+).*/\1/')" >> "$GITHUB_OUTPUT"
+
+      - name: Packages
+        working-directory: flutter
+        run: |
+          flutter --version
+          flutter config --no-analytics
+          flutter pub get
+
+      - name: Test
+        if: matrix.name == 'linux-x64'
+        working-directory: flutter
+        run: flutter test
+
+      - name: Build (Windows)
+        if: runner.os == 'Windows'
+        working-directory: flutter
+        run: flutter build windows --release
+
+      - name: Build (macOS)
+        if: runner.os == 'macOS'
+        working-directory: flutter
+        run: flutter build macos --release
+
+      - name: Build (Linux)
+        if: runner.os == 'Linux'
+        working-directory: flutter
+        run: flutter build linux --release
+
+      - name: Package (macOS)
+        if: runner.os == 'macOS'
+        run: bash flutter/installers/macos/package.sh "${{ steps.v.outputs.version }}" flutter/build/macos/Build/Products/Release/uwuHere.app dist
+
+      - name: Package (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          bundle="$(ls -d flutter/build/linux/*/release/bundle | head -1)"
+          bash flutter/installers/linux/package.sh "${{ steps.v.outputs.version }}" "${{ matrix.arch }}" "$bundle" dist
+
+      - name: Keep the Windows build for packaging
+        if: runner.os == 'Windows'
+        run: |
+          src="$(ls -d flutter/build/windows/*/runner/Release | head -1)"
+          mkdir -p dist
+          cp -r "$src" "dist/${{ matrix.name }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+
+  # Windows' two builds as one installer (it installs whichever the PC is), and the x64 .msi.
+  windows:
+    needs: build
+    if: ${{ !cancelled() && needs.build.result != 'skipped' }}
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name || github.ref }}
+      - uses: actions/download-artifact@v4
+        with:
+          path: parts
+      - id: v
+        run: echo "version=$(grep -E '^version:' flutter/pubspec.yaml | sed -E 's/version:[[:space:]]*([0-9.]+).*/\1/')" >> "$GITHUB_OUTPUT"
+      - name: Installer (.exe)
+        env:
+          # Git Bash would otherwise take /D… and /X… options for paths and rewrite them.
+          MSYS2_ARG_CONV_EXCL: "*"
+        run: |
+          v="${{ steps.v.outputs.version }}"
+          test -d parts/windows-x64/windows-x64 || { echo "The x64 build failed"; exit 1; }
+          command -v makensis || choco install nsis -y --no-progress
+          export PATH="$PATH:/c/Program Files (x86)/NSIS"
+          mkdir -p out
+          x64="$(cygpath -w "$PWD/parts/windows-x64/windows-x64")"
+          args=(-DVERSION="$v" -DX64="$x64" -DOUT="$(cygpath -w "$PWD/out/uwuhere-$v-setup.exe")")
+          if [ -d parts/windows-arm64/windows-arm64 ]; then
+            args+=(-DARM64="$(cygpath -w "$PWD/parts/windows-arm64/windows-arm64")")
+          else
+            echo "::warning::No Arm64 build: the installer carries the x64 app only."
+          fi
+          makensis "${args[@]}" flutter/installers/windows/uwuhere.nsi
+      - name: Installer (.msi)
+        run: |
+          v="${{ steps.v.outputs.version }}"
+          dotnet tool install --global wix --version 5.0.2
+          wix build flutter/installers/windows/uwuhere.wxs -arch x64 -d Version="$v" \
+            -d Source="$(cygpath -w "$PWD/parts/windows-x64/windows-x64")" -o "out/uwuhere-$v.msi"
+          # WiX's debug file stays behind: only the installers go on the release.
+          rm -f out/*.wixpdb
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-installers
+          path: out/
+          retention-days: 7
+
+  # The update files, and everything onto the release.
+  publish:
+    needs: [build, windows]
+    if: ${{ !cancelled() && needs.build.result != 'skipped' }}
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name || github.ref }}
+      - uses: actions/download-artifact@v4
+        with:
+          path: parts
+      - id: v
+        run: echo "version=$(grep -E '^version:' flutter/pubspec.yaml | sed -E 's/version:[[:space:]]*([0-9.]+).*/\1/')" >> "$GITHUB_OUTPUT"
+      - name: Gather
+        run: |
+          mkdir -p dist
+          for d in parts/macos parts/linux-x64 parts/linux-arm64 parts/windows-installers; do
+            [ -d "$d" ] && find "$d" -maxdepth 1 -type f -exec cp {} dist/ \;
+          done
+          node flutter/installers/write-latest-yml.mjs "${{ steps.v.outputs.version }}" dist
+          ls -lh dist
+      - uses: actions/upload-artifact@v4
+        if: env.RELEASE_TAG == ''
+        with:
+          name: uwuhere-${{ steps.v.outputs.version }}-desktop
+          path: dist/
+          retention-days: 30
+      - name: Add them to the release
+        if: env.RELEASE_TAG != ''
+        run: gh release upload "$RELEASE_TAG" dist/* --repo "$GITHUB_REPOSITORY" --clobber

@@ -1,0 +1,10 @@
+// Application-level settings for the Runner target.
+
+// The app's name: the .app's name, the menu bar's, and the window's title. Keep it forever: the
+// updater, login item and links point at uwuHere.app.
+PRODUCT_NAME = uwuHere
+
+// The same id as the Android app's.
+PRODUCT_BUNDLE_IDENTIFIER = org.uwuapps.here
+
+PRODUCT_COPYRIGHT = Copyright © 2026 Augy Studios. MIT licence.

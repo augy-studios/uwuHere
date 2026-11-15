@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1000" width="512" height="512">
+  <title>uwuHere Bug Reports</title>
+  <!-- The bug report bot's picture: uwuHere's figure (docs/assets/uwuhere-icon.svg) with a bug in
+       its badge where the tick would be. Flat, as the app icon is, and drawn at 80% so it
+       survives Telegram's round crop. -->
+  <rect width="1000" height="1000" fill="#ccffcc"/>
+  <g transform="translate(500 500) scale(0.8) translate(-500 -500)">
+    <g transform="translate(-37 -10)">
+      <path d="M260 760 V680 a120 120 0 0 1 120 -120 H560 a120 120 0 0 1 120 120 V760 Z" fill="#2f8cff"/>
+      <path d="M470 560 H560 a120 120 0 0 1 120 120 V760 H470 Z" fill="#1f73e8"/>
+      <rect x="430" y="490" width="80" height="96" rx="18" fill="#f7b9a2"/>
+      <path d="M470 490 H492 a18 18 0 0 1 18 18 V586 H470 Z" fill="#ec9f86"/>
+      <rect x="330" y="204" width="280" height="196" rx="124" fill="#46636c"/>
+      <path d="M470 204 h16 a124 124 0 0 1 124 124 v72 H470 Z" fill="#385159"/>
+      <ellipse cx="342" cy="404" rx="34" ry="44" fill="#f7b9a2"/>
+      <ellipse cx="598" cy="404" rx="34" ry="44" fill="#ec9f86"/>
+      <rect x="345" y="250" width="250" height="290" rx="120" fill="#ffcbb5"/>
+      <path d="M470 250 h5 a120 120 0 0 1 120 120 v50 a120 120 0 0 1 -120 120 h-5 Z" fill="#f7b9a2"/>
+      <path d="M352 336 C352 268 404 228 470 228 C536 228 588 268 588 336 C566 306 532 296 500 300 C462 306 420 306 388 296 C370 306 358 318 352 336 Z" fill="#46636c"/>
+      <path d="M470 228 C536 228 588 268 588 336 C566 306 532 296 500 300 C490 302 480 303 470 303 Z" fill="#385159"/>
+      <g fill="none" stroke="#9c4f2e" stroke-width="16" stroke-linecap="round">
+        <path d="M418 384 v20"/>
+        <path d="M522 384 v20"/>
+        <path d="M470 398 v34 h-12"/>
+        <path d="M430 466 q40 -24 80 0"/>
+      </g>
+      <!-- The badge, with a bug in it. -->
+      <circle cx="690" cy="690" r="125" fill="#ff6b81"/>
+      <path d="M690 565 a125 125 0 0 1 0 250 Z" fill="#e8576d"/>
+      <g stroke="#3a2e33" stroke-linecap="round" fill="none" stroke-width="12">
+        <path d="M672 622 Q662 604 650 600"/>
+        <path d="M708 622 Q718 604 730 600"/>
+        <path d="M646 668 L622 656"/>
+        <path d="M642 694 L616 694"/>
+        <path d="M646 720 L622 734"/>
+        <path d="M734 668 L758 656"/>
+        <path d="M738 694 L764 694"/>
+        <path d="M734 720 L758 734"/>
+      </g>
+      <circle cx="690" cy="636" r="20" fill="#3a2e33"/>
+      <ellipse cx="690" cy="696" rx="46" ry="56" fill="#fff4e8"/>
+      <path d="M690 646 V750" stroke="#3a2e33" stroke-width="8" stroke-linecap="round"/>
+      <circle cx="672" cy="684" r="8" fill="#3a2e33"/>
+      <circle cx="708" cy="716" r="8" fill="#3a2e33"/>
+    </g>
+  </g>
+</svg>

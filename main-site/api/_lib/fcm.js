@@ -1,11 +1,11 @@
-/* Pushes to the Android app (android/) through Firebase Cloud Messaging, to
+/* Pushes to the Android app (flutter/) through Firebase Cloud Messaging, to
    a topic. The app joins its topics when you turn them on with the bell in
    the Edge Tray (HerePlugin.setTopic), so there is no list of phones to keep:
 
      uwuhere-host-<40 hex>   an event's check-ins, from api/_lib/alerts.js
      uwuhere-releases        new versions, from api/push/release.js
      uwuhere-news            sent by hand from the Firebase console
-                             (android/FIREBASE-SETUP.md)
+                             (flutter/FIREBASE-SETUP.md)
 
    FCM's HTTP v1 API, with an OAuth token made from the Firebase project's
    service account: FIREBASE_SERVICE_ACCOUNT holds its JSON key, as

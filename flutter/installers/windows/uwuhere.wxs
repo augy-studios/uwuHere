@@ -1,0 +1,42 @@
+<!-- uwuHere's .msi (docs/desktop-features-spec.md §16), for Group Policy and msiexec: x64, per
+     user, a MajorUpgrade so each version replaces the last, Start menu and desktop shortcuts, and
+     uwu:// links. Its UpgradeCode never changes (uwuHere's own, made for 2.0.0), so each version upgrades the
+     last in place. The app can't update an .msi install itself; it
+     says when there's a new version, with a link to download it.
+
+     Built by .github/workflows/build-desktop.yml with WiX 5:
+       wix build uwuhere.wxs -arch x64 -d Version=2.0.0 -d Source=<x64 Release folder> -o uwuhere-2.0.0.msi -->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="uwuHere" Manufacturer="Augy Studios" Version="$(var.Version)"
+           UpgradeCode="37A38671-0335-4223-A331-9E6668E0AA89" Scope="perUser" Compressed="yes">
+    <MajorUpgrade DowngradeErrorMessage="A newer uwuHere is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+    <Icon Id="AppIcon" SourceFile="$(var.Source)\data\flutter_assets\assets\images\tray.ico" />
+    <Property Id="ARPPRODUCTICON" Value="AppIcon" />
+    <Property Id="ARPURLINFOABOUT" Value="https://here.uwuapps.org" />
+
+    <StandardDirectory Id="LocalAppDataFolder">
+      <Directory Id="ProgramsFolder" Name="Programs">
+        <Directory Id="INSTALLFOLDER" Name="uwuHere" />
+      </Directory>
+    </StandardDirectory>
+
+    <ComponentGroup Id="AppFiles" Directory="INSTALLFOLDER">
+      <Files Include="$(var.Source)\**" />
+    </ComponentGroup>
+
+    <Component Id="Shortcuts" Directory="INSTALLFOLDER" Guid="d432ba04-8543-4238-a211-3d9e5bbbf25c">
+      <Shortcut Id="StartMenu" Directory="ProgramMenuFolder" Name="uwuHere" Target="[INSTALLFOLDER]uwuHere.exe" WorkingDirectory="INSTALLFOLDER" />
+      <Shortcut Id="Desktop" Directory="DesktopFolder" Name="uwuHere" Target="[INSTALLFOLDER]uwuHere.exe" WorkingDirectory="INSTALLFOLDER" />
+      <RegistryValue Root="HKCU" Key="Software\Classes\uwu" Value="URL:UwU Apps link" Type="string" KeyPath="yes" />
+      <RegistryValue Root="HKCU" Key="Software\Classes\uwu" Name="URL Protocol" Value="" Type="string" />
+      <RegistryValue Root="HKCU" Key="Software\Classes\uwu\shell\open\command" Value="&quot;[INSTALLFOLDER]uwuHere.exe&quot; &quot;%1&quot;" Type="string" />
+      <RemoveFolder Id="RemoveInstallFolder" Directory="INSTALLFOLDER" On="uninstall" />
+    </Component>
+
+    <Feature Id="Main">
+      <ComponentGroupRef Id="AppFiles" />
+      <ComponentRef Id="Shortcuts" />
+    </Feature>
+  </Package>
+</Wix>

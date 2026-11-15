@@ -1,0 +1,12 @@
+import { chromium } from "@playwright/test";
+const [,, out, query = "", w = "412", h = "892"] = process.argv;
+const b = await chromium.launch();
+const p = await b.newPage({ viewport: { width: +w, height: +h }, deviceScaleFactor: 1 });
+const errs = [];
+p.on("pageerror", (e) => errs.push(String(e)));
+p.on("console", (m) => { if (m.type() === "error") errs.push(m.text()); });
+await p.goto("http://127.0.0.1:47391/" + query);
+await p.waitForTimeout(4500);
+await p.screenshot({ path: out });
+console.log(errs.join("\n") || "no errors");
+await b.close();

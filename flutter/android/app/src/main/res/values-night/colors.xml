@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The stage in dark mode is near-black. -->
+    <color name="launch">#0C100E</color>
+    <color name="notification_colour">#4ADE80</color>
+</resources>

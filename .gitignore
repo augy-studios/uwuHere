@@ -15,8 +15,29 @@ keystore.properties
 google-services.json
 *firebase-adminsdk*.json
 
-# release/<version>/uwuhere-<version>.apk is built by android/build-apk.ps1
-# and committed, so nothing under release/ is ignored.
+# release/<version>/ keeps the Android builds (release/README.md): the APK and the App Bundle for
+# Google Play, and this README. GitHub refuses any file over 100 MB, so one that big is listed here
+# by name and goes only on the GitHub release (none so far). The rest never goes in git: the
+# desktop installers (GitHub Actions puts them on the release), their latest*.yml files, and the
+# R8 mapping and Dart symbols that read crash reports back, which stay on this computer.
+release/**
+!release/*/
+!release/README.md
+!release/*/*.apk
+!release/*/*.aab
+release/*/*-mapping.txt
+release/*/*-symbols.zip
+
+# The desktop installers, wherever else a build leaves them.
+*.deb
+*.AppImage
+*.msi
+*.dmg
+*-setup.exe
+
+# What's left on disk of the Capacitor app (1.0.x), which flutter/ replaced: its keystore copy,
+# Firebase file, builds and packages. Never committed.
+/android/
 
 # Vercel
 .vercel

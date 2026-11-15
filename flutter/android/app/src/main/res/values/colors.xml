@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The launch screen: the site's brand green, so the splash and the first frame match. -->
+    <color name="launch">#CCFFCC</color>
+    <color name="notification_colour">#1F6B3D</color>
+</resources>

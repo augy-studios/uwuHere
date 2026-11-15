@@ -27,7 +27,7 @@
             }]
         },
         {
-            "source": "/(index.html|host|host.html|join|join.html)?",
+            "source": "/(index.html|host|host.html|join|join.html|privacy|privacy.html)?",
             "headers": [{
                 "key": "Cache-Control",
                 "value": "public, max-age=0, must-revalidate"

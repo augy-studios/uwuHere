@@ -1,0 +1,204 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <!-- Permissions. Each says what asks for it and when; none is asked at launch. -->
+
+    <!-- The site's API, same-wifi check-in's pairing, the update check. Install time. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- The host's screen held on while check-ins can arrive (wakelock_plus). -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Check-ins to your events, new versions and news, asked for only when one of their
+         switches is turned on (Android 13+). -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Installing a downloaded update (the GitHub APK only: src/play/ takes it out). -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
+    <!-- Checking in by location, and a host setting the event's spot (geolocator): asked when
+         somebody presses something that needs it. Only the distance is kept, by the server. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+
+    <!-- Tapping phones: this phone answers as an NFC tag while a host page has it on
+         (TapService.java). Granted at install, never asked. -->
+    <uses-permission android:name="android.permission.NFC" />
+
+    <!-- Checking in with no internet: this phone's own wifi hotspot, serving a check-in page
+         (Hotspot.java), started only when the host asks. "Nearby devices" on Android 13 and later,
+         asked then, and never used to find where anyone is; before 13, location stands in. -->
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+    <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES"
+        android:usesPermissionFlags="neverForLocation" />
+
+    <!-- Checking in by Bluetooth, app to app, over Google's Nearby Connections (Mesh.java). Asked
+         as one "Nearby devices" prompt on Android 12 and later, when a host turns it on or an
+         attendee presses the button; location stands in before 12. -->
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+
+    <!-- No ads and no analytics: the advertising ID is never used, and no library may add it
+         (Play Console's Advertising ID declaration says "No", GOOGLE-PLAY.md). -->
+    <uses-permission android:name="com.google.android.gms.permission.AD_ID" tools:node="remove" />
+
+    <!-- All optional: a phone without them still installs the app, and the host page says which
+         way in it can't offer. -->
+    <uses-feature android:name="android.hardware.nfc" android:required="false" />
+    <uses-feature android:name="android.hardware.nfc.hce" android:required="false" />
+    <uses-feature android:name="android.hardware.bluetooth" android:required="false" />
+    <uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />
+    <uses-feature android:name="android.hardware.wifi" android:required="false" />
+    <uses-feature android:name="android.hardware.location" android:required="false" />
+    <uses-feature android:name="android.hardware.location.gps" android:required="false" />
+    <uses-feature android:name="android.hardware.location.network" android:required="false" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
+
+    <application
+        android:label="@string/app_name"
+        android:name="${applicationName}"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:enableOnBackInvokedCallback="true">
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:taskAffinity=""
+            android:theme="@style/LaunchTheme"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode|navigation"
+            android:hardwareAccelerated="true"
+            android:windowSoftInputMode="adjustResize">
+            <meta-data
+              android:name="io.flutter.embedding.android.NormalTheme"
+              android:resource="@style/NormalTheme"
+              />
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+            <!-- The site's own links, so a phone's camera scanning a host's QR code lands on the
+                 check-in button here: verified by main-site/.well-known/assetlinks.json. -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host="here.uwuapps.org" />
+            </intent-filter>
+            <!-- uwu://here/…, the scheme every UwU App shares, told apart by host. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="uwu" android:host="here" />
+            </intent-filter>
+            <!-- NFC tags holding the site's links or uwu://here/ ones: a host's phone answering as
+                 a tag (TapService), or a sticker. The tap opens straight in the app; phones without
+                 the app open the link in their browser. Only these links, never every tag. -->
+            <intent-filter>
+                <action android:name="android.nfc.action.NDEF_DISCOVERED" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="https" android:host="here.uwuapps.org" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.nfc.action.NDEF_DISCOVERED" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="uwu" android:host="here" />
+            </intent-filter>
+            <!-- A notification tapped while the app was in front (MessagingService). -->
+            <intent-filter>
+                <action android:name="org.uwuapps.here.OPEN_UPDATES" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
+        <!-- Notifications pushed through Firebase while the app is in front. -->
+        <service
+            android:name=".MessagingService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+        <!-- Firebase's defaults for a push it shows itself, while the app is in the background.
+             The site's pushes name their own channel (checkins, releases), so this is news's. -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="news" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_icon"
+            android:resource="@drawable/ic_notification_icon" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_color"
+            android:resource="@color/notification_colour" />
+
+        <!-- Tapping phones. Disabled until a host page turns it on (TapService.start), so the app
+             doesn't claim the NFC tag application when nobody is hosting. Exported for Android's
+             NFC service, the only caller BIND_NFC_SERVICE lets in. -->
+        <service android:name=".TapService"
+            android:enabled="false"
+            android:exported="true"
+            android:permission="android.permission.BIND_NFC_SERVICE">
+            <intent-filter>
+                <action android:name="android.nfc.cardemulation.action.HOST_APDU_SERVICE" />
+            </intent-filter>
+            <meta-data android:name="android.nfc.cardemulation.host_apdu_service"
+                android:resource="@xml/tap_service" />
+        </service>
+
+        <!-- Home screen widgets. "Your event" (EventWidget.java): the event this phone hosts, and
+             how many are here, refreshed by WidgetWorker while it's on. "Check in"
+             (ShortcutWidget.java): buttons into the home page. Not exported: only Android's widget
+             service, as the system, and this app send to them. -->
+        <receiver android:name=".EventWidget"
+            android:exported="false"
+            android:label="@string/widget_event_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider"
+                android:resource="@xml/widget_event" />
+        </receiver>
+        <receiver android:name=".ShortcutWidget"
+            android:exported="false"
+            android:label="@string/widget_shortcut_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider"
+                android:resource="@xml/widget_shortcut" />
+        </receiver>
+
+        <!-- The downloaded update, handed to Android's installer. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.files"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
+        <meta-data
+            android:name="flutterEmbedding"
+            android:value="2" />
+    </application>
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.PROCESS_TEXT"/>
+            <data android:mimeType="text/plain"/>
+        </intent>
+        <!-- Links out: the browser and the mail app. -->
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="https" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.SENDTO" />
+            <data android:scheme="mailto" />
+        </intent>
+    </queries>
+</manifest>

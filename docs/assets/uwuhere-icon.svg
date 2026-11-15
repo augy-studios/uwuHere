@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1000">
+  <!-- uwuHere app icon, in UwU Apps' flat style: solid fills, each shape's right half a shade
+       darker, no gradients, shadows or sparkles. Someone with a tick beside them: they're here.
+       The figure and the tick are centred together on the canvas, and nothing reaches further than
+       375 from the centre, so a round crop (radius 500) or a maskable one (radius 400) keeps all
+       of it. The launcher's adaptive icon draws #ui at 80% (tool/make_icons.py), inside Android's
+       safe circle. -->
+  <rect width="1000" height="1000" fill="#ccffcc"/>
+
+  <g id="ui" transform="translate(-37 -10)">
+    <!-- Shoulders: a rounded-top bust, cut flat at the bottom. -->
+    <path d="M260 760 V680 a120 120 0 0 1 120 -120 H560 a120 120 0 0 1 120 120 V760 Z" fill="#2f8cff"/>
+    <path d="M470 560 H560 a120 120 0 0 1 120 120 V760 H470 Z" fill="#1f73e8"/>
+
+    <!-- Neck, and its shadow under the chin. -->
+    <rect x="430" y="490" width="80" height="96" rx="18" fill="#f7b9a2"/>
+    <path d="M470 490 H492 a18 18 0 0 1 18 18 V586 H470 Z" fill="#ec9f86"/>
+
+    <!-- The back of the hair, behind the head, so no backdrop shows between them. -->
+    <rect x="330" y="204" width="280" height="196" rx="124" fill="#46636c"/>
+    <path d="M470 204 h16 a124 124 0 0 1 124 124 v72 H470 Z" fill="#385159"/>
+
+    <!-- Ears. -->
+    <ellipse cx="342" cy="404" rx="34" ry="44" fill="#f7b9a2"/>
+    <ellipse cx="598" cy="404" rx="34" ry="44" fill="#ec9f86"/>
+
+    <!-- Head. -->
+    <rect x="345" y="250" width="250" height="290" rx="120" fill="#ffcbb5"/>
+    <path d="M470 250 h5 a120 120 0 0 1 120 120 v50 a120 120 0 0 1 -120 120 h-5 Z" fill="#f7b9a2"/>
+
+    <!-- The fringe, over the top of the head. -->
+    <path d="M352 336 C352 268 404 228 470 228 C536 228 588 268 588 336
+             C566 306 532 296 500 300 C462 306 420 306 388 296 C370 306 358 318 352 336 Z" fill="#46636c"/>
+    <path d="M470 228 C536 228 588 268 588 336 C566 306 532 296 500 300 C490 302 480 303 470 303 Z" fill="#385159"/>
+
+    <!-- Face. -->
+    <g fill="none" stroke="#9c4f2e" stroke-width="16" stroke-linecap="round">
+      <path d="M418 384 v20"/>
+      <path d="M522 384 v20"/>
+      <path d="M470 398 v34 h-12"/>
+      <path d="M426 458 q44 36 88 0"/>
+    </g>
+
+    <!-- The tick: a round badge over the right shoulder. -->
+    <circle cx="690" cy="690" r="125" fill="#14c38e"/>
+    <path d="M690 565 a125 125 0 0 1 0 250 Z" fill="#0ea877"/>
+    <path d="M630 692 l42 42 l84 -86" fill="none" stroke="#dff6ff" stroke-width="34" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>

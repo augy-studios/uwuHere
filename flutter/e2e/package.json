@@ -1,0 +1,13 @@
+{
+  "name": "uwuhere-e2e",
+  "private": true,
+  "description": "uwuHere's Flutter app in a browser, driven by Playwright (README.md).",
+  "type": "module",
+  "scripts": {
+    "build": "cd .. && flutter build web -t e2e/main_e2e.dart --profile --no-web-resources-cdn",
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.56.0"
+  }
+}

@@ -1,0 +1,325 @@
+<!doctype html>
+<html lang="en-GB">
+
+<head>
+    <!-- Google tag (gtag.js): the site's own, as on every page (said in "The website" below). -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-FMCYFTFPEL"></script>
+    <script>
+        window.dataLayer = window.dataLayer || [];
+
+        function gtag() {
+            dataLayer.push(arguments);
+        }
+        gtag('js', new Date());
+
+        gtag('config', 'G-FMCYFTFPEL');
+    </script>
+
+    <meta charset="utf-8">
+    <title>Privacy | uwuHere | UwU Apps</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="description" content="What uwuHere keeps about hosts and attendees, where it goes, and when it's deleted." />
+
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="Privacy | uwuHere" />
+    <meta property="og:site_name" content="UwU Apps" />
+    <meta property="og:description" content="What uwuHere keeps about hosts and attendees, where it goes, and when it's deleted." />
+
+    <script>
+        // The reader's light or dark mode and colour, as the other pages have them (index.html does
+        // the same before first paint; keep the hours in step with js/theme.js).
+        (function () {
+            var k = "uwuhere";
+            var m = "light", c = "classic";
+            try {
+                m = localStorage.getItem(k + ".mode") || "light";
+                c = localStorage.getItem(k + ".colorTheme") || "classic";
+            } catch (e) {}
+            if (m === "time") {
+                var h = new Date().getHours();
+                m = h >= 9 && h < 18 ? "light" : "dark";
+            }
+            document.documentElement.setAttribute("data-mode", m);
+            document.documentElement.setAttribute("data-color-theme", c);
+        })();
+    </script>
+
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Jua&display=swap">
+    <link rel="stylesheet" href="/css/theme.css">
+    <link rel="stylesheet" href="/privacy.css">
+    <meta name="theme-color" content="#ccffcc" />
+
+    <link rel="apple-touch-icon" href="/HAT-192.png">
+    <link rel="icon" href="/favicon.ico">
+    <link rel="shortcut icon" href="/favicon.ico">
+    <meta property="og:image" content="/HAT-main.png" />
+</head>
+
+<body class="legal">
+    <main class="glass legal-page">
+        <a class="legal-home" href="/">
+            <img src="/HAT-192.png" width="32" height="32" alt="" />
+            <span class="logo-text">uwuHere</span>
+        </a>
+
+        <h1>Privacy</h1>
+        <p class="legal-date">Last updated 16 November 2026</p>
+
+        <p>uwuHere is made by Augy Studios. This page says what uwuHere keeps about hosts and attendees,
+            where it goes, and when it's deleted. It covers the website at here.uwuapps.org, the Android
+            app (from Google Play or GitHub), and the Windows, macOS and Linux apps.</p>
+
+        <section class="legal-short" aria-labelledby="short">
+            <h2 id="short">The short version</h2>
+            <ul>
+                <li>No ads, and nothing about you is sold. The apps have no analytics or tracking, and
+                    don't use your device's advertising ID. The website counts visits with Google
+                    Analytics.</li>
+                <li>There are no accounts. An event keeps the names people type to check in, how they
+                    checked in and when, and nothing else about them.</li>
+                <li>Your location is used once, to work out how far you are from the host, and only that
+                    distance is kept. Never where you were.</li>
+                <li>Every event is deleted 7 days after it ends, or 30 days after it was made if nobody
+                    ends it.</li>
+            </ul>
+        </section>
+
+        <nav class="legal-toc" aria-label="Contents">
+            <ol>
+                <li><a href="#hosts">If you host an event</a></li>
+                <li><a href="#attendees">If you check in</a></li>
+                <li><a href="#ways">How each way of checking in works</a></li>
+                <li><a href="#device">What stays on your device</a></li>
+                <li><a href="#bug">Report a bug</a></li>
+                <li><a href="#notifications">Updates and notifications</a></li>
+                <li><a href="#website">The website</a></li>
+                <li><a href="#android">Android permissions</a></li>
+                <li><a href="#providers">Who else handles your data</a></li>
+                <li><a href="#delete">Keeping and deleting your data</a></li>
+                <li><a href="#rights">Your choices and rights</a></li>
+                <li><a href="#security">Keeping it safe</a></li>
+                <li><a href="#children">Children</a></li>
+                <li><a href="#changes">Changes to this page</a></li>
+                <li><a href="#contact">Contact</a></li>
+            </ol>
+        </nav>
+
+        <h2 id="hosts">1. If you host an event</h2>
+        <p>Making an event keeps, on uwuHere's server:</p>
+        <ul>
+            <li>what you set: its name, the button's words and colour, the extra field's name, the ways
+                people can check in, and the distance for location check-in;</li>
+            <li>if location check-in is on, the event's spot: where your device was when you made the
+                event, or moved the spot, with how accurate that was;</li>
+            <li>if you set a password, a one-way scrambled form of it (bcrypt with a secret only the
+                server knows), never the password itself. Passwords are checked against known data
+                breaches by sending only the first 5 characters of their SHA-1 to Have I Been Pwned;</li>
+            <li>whether it's paused, when it was made and when it ended.</li>
+        </ul>
+        <p>Your device is given a host key for the event, kept in its own storage, which lets it manage
+            the event. There's nothing else about you: no name, email or account.</p>
+
+        <h2 id="attendees">2. If you check in</h2>
+        <p>Checking in keeps, with the event:</p>
+        <ul>
+            <li>the name you type, and the extra field if the host asked for one (such as a student
+                ID);</li>
+            <li>how you checked in (same wifi, location, tapping phones, Bluetooth, the host's hotspot,
+                or added by the host) and when, and when you left, if you said you left early;</li>
+            <li>for a location check-in, how far you were from the event's spot, in metres. Not where
+                you were;</li>
+            <li>a scrambled form (SHA-256) of a random ID your device makes for itself, so the same
+                device checks in once. The host never sees the ID.</li>
+        </ul>
+        <p>The host sees the list, and can download it as a spreadsheet (CSV). What they do with their
+            copy is up to them.</p>
+
+        <h2 id="ways">3. How each way of checking in works</h2>
+        <ul>
+            <li><strong>Same wifi</strong>: your device and the host's open screen are introduced by
+                <strong>PeerJS</strong>'s public service, which sees both IP addresses and the event's
+                code, then talk directly, encrypted, over WebRTC. Each asks a STUN server (Google's or
+                Cloudflare's) for its own public address. There is no relay: your name goes straight to
+                the host's device, which saves it.</li>
+            <li><strong>Location</strong>: your device's location is read once, when you press the
+                button, and sent to the server, which works out the distance, keeps that, and drops
+                the location.</li>
+            <li><strong>Tapping phones</strong>: the host's Android phone hands your phone a link with a
+                one-time token over NFC. Only the token's code is kept, so it can't be used twice.</li>
+            <li><strong>Bluetooth</strong> (the Android app on both phones, with Google Play services):
+                the phones find each other with Google's Nearby Connections, with no internet needed,
+                and your name goes straight to the host's phone.</li>
+            <li><strong>The host's hotspot</strong>: the host's phone becomes a wifi network with a
+                check-in page of its own. Your name goes to the host's phone, then to the server once
+                it's back online.</li>
+        </ul>
+
+        <h2 id="device">4. What stays on your device</h2>
+        <p>Your device keeps, in the browser's storage on the website and the app's own storage in the
+            apps: the events you host and their host keys, the last copy of each list (so it opens
+            offline), check-ins waiting to be sent, your own check-ins, the name you last typed, and
+            your theme. The first time the 2.0 Android app opens after an update from 1.0, it copies
+            what the older app kept on the same phone into its own storage. Nothing leaves the device
+            for that.</p>
+
+        <h2 id="bug">5. Report a bug</h2>
+        <p>If you use <strong>Report a bug</strong>, what you send goes to uwuHere's server and on to
+            Augy Studios as a message from a Telegram bot. It contains what you typed, a way to reach
+            you if you give one, up to three pictures if you add them (a screenshot shows whatever is
+            on that page, which can include an event's list), and what helps find the bug, shown to you
+            before it's sent: the app's version, which app, your device and system as your browser or
+            app describes them, and the page you were on. Never an event's code, name or list, unless a
+            picture you add shows them.</p>
+        <p>uwuHere's server doesn't store reports. They're kept in Augy Studios' Telegram chats, which
+            Telegram stores under <a href="https://telegram.org/privacy">its own privacy policy</a>. To
+            limit misuse, the server counts reports from each IP address for a minute and, where set up,
+            for an hour. Each report gets an ID (like 20261116-7K3Q): quote it to have that report
+            deleted.</p>
+
+        <h2 id="notifications">6. Updates and notifications</h2>
+        <ul>
+            <li><strong>Notifications</strong> on Android (each off until you turn it on with the bell)
+                use Firebase Cloud Messaging, Google's push service. Your phone joins topics: one for new
+                versions, one for news, and one for each event you host, named from its host key so
+                nobody else can join it. uwuHere's server keeps no list of phones. "Alex checked in"
+                notifications carry the attendee's name and the event's name.</li>
+            <li><strong>The Android app from GitHub</strong> asks uwuHere's server whether there's a new
+                version, and downloads it from GitHub, which sees your IP address. <strong>From Google
+                Play</strong>, Google Play updates it.</li>
+            <li><strong>The Windows, macOS and Linux apps</strong> check GitHub for new versions about
+                once an hour, and, while they run, check the events you host each minute for check-in
+                notifications.</li>
+            <li><strong>The "Your event" widget</strong> on Android refreshes its event's numbers from
+                uwuHere's server with the event's host key.</li>
+        </ul>
+
+        <h2 id="website">7. The website</h2>
+        <ul>
+            <li><strong>Google Analytics</strong> counts visits to the website's pages: which pages are
+                opened, roughly where from, and on what kind of device and browser. It uses cookies to
+                tell visits apart. It's on the website only, never in the apps. Your browser's settings
+                or an ad blocker can stop it, and uwuHere works the same without it.</li>
+            <li><strong>Google Fonts</strong> serves the website's font, so Google sees your IP address
+                when it loads. The apps carry the font themselves.</li>
+            <li>For same-wifi check-in, the website loads the PeerJS library from
+                <strong>cdnjs</strong> (Cloudflare).</li>
+        </ul>
+
+        <h2 id="android">8. Android permissions</h2>
+        <ul>
+            <li><strong>Internet</strong>: to reach uwuHere's server, and for same-wifi check-in.</li>
+            <li><strong>Location</strong>: only when you press something that needs it (checking in by
+                location, or setting an event's spot). It isn't kept.</li>
+            <li><strong>NFC</strong>: for tapping phones, while a host page you have open uses it.</li>
+            <li><strong>Nearby devices</strong> (Bluetooth and Wi-Fi; location on Android 12 and older,
+                which Android needs for them there): only asked for when you use Bluetooth check-in or
+                start the hotspot. It isn't used to find where you are.</li>
+            <li><strong>Notifications</strong>: only asked for when you turn one on with the bell.</li>
+            <li><strong>Install apps</strong>: the GitHub version only, to install its own updates when
+                you choose <strong>Update</strong>. The Google Play version doesn't have it.</li>
+            <li><strong>Keep the screen on</strong>: while a host page is taking check-ins.</li>
+        </ul>
+        <p>uwuHere doesn't use your contacts, camera, microphone, files or advertising ID.</p>
+
+        <h2 id="providers">9. Who else handles your data</h2>
+        <p>These companies run parts of uwuHere for us. They handle your data only to provide that
+            part, under their own privacy policies. We don't sell or share your data with anyone else,
+            and nothing is used for advertising.</p>
+        <div class="legal-table">
+            <table>
+                <thead>
+                    <tr>
+                        <th scope="col">Who</th>
+                        <th scope="col">What for</th>
+                        <th scope="col">What it handles</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td data-label="Who"><a href="https://supabase.com/privacy">Supabase</a></td>
+                        <td data-label="What for">The database that keeps events and their lists</td>
+                        <td data-label="What it handles">Everything in sections 1 and 2</td>
+                    </tr>
+                    <tr>
+                        <td data-label="Who"><a href="https://vercel.com/legal/privacy-policy">Vercel</a></td>
+                        <td data-label="What for">Runs the website and uwuHere's server, in Singapore</td>
+                        <td data-label="What it handles">Requests to the server, and its logs (with IP addresses), kept for a short time</td>
+                    </tr>
+                    <tr>
+                        <td data-label="Who"><a href="https://policies.google.com/privacy">Google</a></td>
+                        <td data-label="What for">Firebase Cloud Messaging and Nearby Connections (Android), Google Analytics and Google Fonts (website), STUN for same-wifi check-in</td>
+                        <td data-label="What it handles">Notification addresses and their words, visit counts, IP addresses</td>
+                    </tr>
+                    <tr>
+                        <td data-label="Who"><a href="https://telegram.org/privacy">Telegram</a></td>
+                        <td data-label="What for">Delivers bug reports to Augy Studios</td>
+                        <td data-label="What it handles">The reports you send (section 5)</td>
+                    </tr>
+                    <tr>
+                        <td data-label="Who"><a href="https://www.cloudflare.com/privacypolicy/">Cloudflare</a></td>
+                        <td data-label="What for">STUN, and cdnjs (website)</td>
+                        <td data-label="What it handles">IP addresses</td>
+                    </tr>
+                    <tr>
+                        <td data-label="Who"><a href="https://peerjs.com/">PeerJS</a></td>
+                        <td data-label="What for">Introduces an attendee's device to the host's screen</td>
+                        <td data-label="What it handles">IP addresses and the event's code</td>
+                    </tr>
+                    <tr>
+                        <td data-label="Who"><a href="https://haveibeenpwned.com/Privacy">Have I Been Pwned</a></td>
+                        <td data-label="What for">Checks a new event password against known breaches</td>
+                        <td data-label="What it handles">5 characters of the password's SHA-1, which can't be turned back into it</td>
+                    </tr>
+                    <tr>
+                        <td data-label="Who"><a href="https://docs.github.com/site-policy/privacy-policies/github-general-privacy-statement">GitHub</a></td>
+                        <td data-label="What for">Hosts the app downloads and their updates</td>
+                        <td data-label="What it handles">IP addresses</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        <p>Some of these are outside your country, so your data may be handled in other countries,
+            such as Singapore and the United States.</p>
+
+        <h2 id="delete">10. Keeping and deleting your data</h2>
+        <ul>
+            <li>An event, its list and everyone's names on it are deleted 7 days after the host ends it,
+                or 30 days after it was made if nobody ends it. Nothing is kept after that.</li>
+            <li>A host can remove anyone from the list at any time, which deletes that check-in.</li>
+            <li>An attendee who wants their check-in removed before then can ask the host, or email us
+                with the event's code.</li>
+            <li>Uninstalling the app, or clearing the website's data, deletes what your device kept.
+                Forgetting an event on the home page deletes this device's copy of it.</li>
+            <li>Bug reports can be deleted on request: email us and quote the report's ID.</li>
+        </ul>
+
+        <h2 id="rights">11. Your choices and rights</h2>
+        <p>Depending on where you live (for example under the UK or EU GDPR, or Singapore's PDPA), you
+            may have the right to see the data we hold about you, have it corrected or deleted, take a
+            copy, or object to how it's used. Email us to ask, and we'll answer within 30 days. You can
+            also complain to your local data protection authority.</p>
+
+        <h2 id="security">12. Keeping it safe</h2>
+        <p>Everything between your device and uwuHere's server is sent over HTTPS. The database is
+            reachable only through uwuHere's server, and the keys to it, the host keys' secret, the
+            password secret and the bug report bot stay on the server. No service is perfectly secure,
+            but if something goes wrong that affects your data, we'll tell you.</p>
+
+        <h2 id="children">13. Children</h2>
+        <p>uwuHere can be used to take attendance where children are present, such as a class, by an
+            adult host who's responsible for the list. We don't knowingly collect more than the names
+            typed to check in, and every list is deleted as section 10 says. If you think a child's
+            data should be removed sooner, email us with the event's code.</p>
+
+        <h2 id="changes">14. Changes to this page</h2>
+        <p>If what uwuHere does with your data changes, this page changes with it, and the date at the
+            top says when. Bigger changes are also said in the apps' release notes.</p>
+
+        <h2 id="contact">15. Contact</h2>
+        <p>Augy Studios, <a href="mailto:augy@augystudios.com">augy@augystudios.com</a>.</p>
+
+        <p class="legal-back"><a href="/">Back to uwuHere</a></p>
+    </main>
+</body>
+
+</html>

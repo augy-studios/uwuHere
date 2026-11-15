@@ -1,7 +1,7 @@
 /* POST /api/push/release   a new version of the Android app is out
 
    GitHub calls this for the repository's releases (a webhook,
-   android/FIREBASE-SETUP.md), and it pushes "Version 1.2.0 of uwuHere is out"
+   flutter/FIREBASE-SETUP.md), and it pushes "Version 1.2.0 of uwuHere is out"
    to the uwuhere-releases topic, which the app joins when "New versions of
    the app" is turned on (js/app-notify.js). Tapping it opens the app's update
    window (MainActivity, UpdateActivity).

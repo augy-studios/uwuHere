@@ -11,23 +11,27 @@ people, pause check-ins, download a CSV, and end the event.
 No accounts. The host page is kept in the browser that made the event, and an
 optional password opens it on another device.
 
-It also comes as an Android app: the same site in a Capacitor WebView, which
-adds what a web page can't do there (the host's screen kept on, the QR code at
-full brightness, the CSV saved to Downloads, check-in notifications) and
-updates itself from GitHub Releases. The website and PWA work as before.
+There are apps too, built with Flutter from one project: for Android (Material You by default,
+tapping phones, Bluetooth check-in from app to app, your phone as the wifi when the venue has
+none, home screen widgets, notifications, and an Updates page) and for Windows, macOS and Linux
+(your events beside the page, a command bar, a widget and the tray). Downloads are on the
+[latest release](https://github.com/augy-studios/uwuHere/releases/latest), and
+[Privacy](https://here.uwuapps.org/privacy) says what's kept and when it's deleted. The website
+and PWA work as before, and attendees never need an app.
 
 ## Repository layout
 
 ```text
-main-site/                      the app: static pages plus Vercel functions
-android/                        the Android app (Capacitor), see android/README.md
-release/                        built and signed APKs, one folder per version
+main-site/                      the website: static pages plus Vercel functions
+flutter/                        the Android, Windows, macOS and Linux apps (flutter/README.md)
+release/                        the APKs and the App Bundle, one folder per version, and how to publish
+announcements/                  release notes for GitHub and Google Play, and Telegram announcements
 migrations/                     SQL to run once in the Supabase SQL editor
-uwuapps-theme.md                theme spec, shared across UwU Apps
-uwuapps-retrofit-time-mode.md   how time-based mode is added to the theme
-update-bar-spec.md              the "new version is ready" bar
-edge-tray-spec.md               the floating action tray, top right
-STUN-p2p-spec.md                peer-to-peer pairing over STUN only
+docs/                           the specs the site and the apps follow, the icon, and the store's screenshots
+scripts/                        bug-report-test.mjs, Report a bug's API tested without Telegram
+.github/workflows/              builds the desktop installers onto the GitHub release
+GOOGLE-PLAY.md                  putting the Android app on Google Play
+BUG-REPORT-SETUP.md             the Telegram bot that Report a bug sends through
 CODE_OF_CONDUCT.md
 LICENSE                         MIT
 ```
@@ -43,11 +47,13 @@ check-in works, where data lives, and what to do before a deploy.
    `main-site/.env.example`. Vercel installs the one dependency (`bcryptjs`)
    from `main-site/package.json`.
 3. **Domain.** Point `here.uwuapps.org` at the Vercel project.
-4. **Android app (optional).** Build it with one command from the project
-   root, `powershell -ExecutionPolicy Bypass -File android\build-apk.ps1`, which
-   puts the signed APK in `release/<version>/`. `android/README.md` covers the
-   first build's signing key, `release/README.md` publishing it, and
-   `android/FIREBASE-SETUP.md` its notifications.
+4. **Apps (optional).** Build the Android app with one command from the
+   project root, `powershell -ExecutionPolicy Bypass -File flutter\build-apk.ps1`
+   (add `-Aab` for Google Play), which puts the signed file in
+   `release/<version>/`. GitHub Actions builds the desktop apps on each release.
+   `flutter/README.md` covers building, `release/README.md` publishing,
+   `GOOGLE-PLAY.md` the store, `flutter/FIREBASE-SETUP.md` notifications and
+   `BUG-REPORT-SETUP.md` Report a bug.
 
 ### Migrations
 
@@ -71,9 +77,9 @@ bcrypt string; see `main-site/api/_lib/auth.js`.
 
 ## The specs
 
-The `.md` files at the root are portable specs shared with other UwU Apps
-projects, and they are the source of truth for what they cover. When one of
-them changes, the app follows it.
+The specs in `docs/` are shared with the other UwU Apps projects, and they are
+the source of truth for what they cover. When one of them changes, the site and
+the apps follow it.
 
 - **`uwuapps-theme.md`**: seven brand colours and light, dark or time-based
   mode. `css/theme.css` and `js/theme.js` follow it, with only the storage key
@@ -84,6 +90,9 @@ them changes, the app follows it.
 - **`STUN-p2p-spec.md`**: the same-wifi check-in. uwuHere uses it STUN only,
   on purpose: a TURN relay would let a phone anywhere reach the host, and the
   check would prove nothing.
+- **`page-tour-spec.md`**: the first-visit tours, on the site and in the apps.
+- **`flutter-android-app-spec.md`**, **`flutter-desktop-app-spec.md`**,
+  **`desktop-features-spec.md`**: what the apps are and how they're built.
 
 ## Running it locally
 

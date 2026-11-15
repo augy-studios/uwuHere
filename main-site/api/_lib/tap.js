@@ -1,7 +1,7 @@
 /* Checking in by tapping phones.
 
    The host's phone, in the Android app, acts as an NFC tag
-   (android/.../TapService.java). Each phone that touches it is handed a link
+   (flutter/android/.../TapService.java). Each phone that touches it is handed a link
    to the join page with a token on the end, made fresh for that tap:
 
      https://here.uwuapps.org/join?id=CODE&tap=TIME.NONCE.MAC

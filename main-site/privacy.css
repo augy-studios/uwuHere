@@ -1,0 +1,239 @@
+/* The Privacy page (privacy.html), on top of css/theme.css, which gives it the app's colours, font,
+   light and dark modes and glass panel. theme.css and app.css are for a full-screen app: no page scroll, no
+   text selection, no margins or list indents. A document needs all of those back. */
+
+html:has(body.legal),
+body.legal {
+  height: auto;
+  min-height: 100%;
+  overflow: auto;
+}
+
+body.legal {
+  display: block;
+  padding: 32px 16px 48px;
+}
+
+body.legal,
+body.legal * {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.legal-page {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 32px 40px 36px;
+  font-size: 15px;
+  line-height: 1.65;
+  color: var(--ink);
+  /* Long words and addresses wrap rather than push the page sideways on a phone. */
+  overflow-wrap: anywhere;
+}
+
+.legal-home {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 20px;
+  text-decoration: none;
+}
+
+.legal-home img {
+  border-radius: 9px;
+  display: block;
+}
+
+.legal-page h1 {
+  font-size: 32px;
+  line-height: 1.2;
+  letter-spacing: -0.5px;
+}
+
+.legal-date {
+  color: var(--muted);
+  margin: 4px 0 20px;
+}
+
+.legal-page h2 {
+  font-size: 20px;
+  line-height: 1.3;
+  margin: 32px 0 8px;
+  /* Clear of the top when jumped to from the contents. */
+  scroll-margin-top: 16px;
+}
+
+.legal-page p,
+.legal-page ul,
+.legal-page ol {
+  margin: 0 0 12px;
+}
+
+.legal-page ul,
+.legal-page ol {
+  padding-left: 22px;
+}
+
+.legal-page li {
+  margin-bottom: 6px;
+}
+
+.legal-page li::marker {
+  color: var(--muted);
+}
+
+.legal-page a {
+  color: var(--brand-ink);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.legal-page a:hover {
+  text-decoration-thickness: 2px;
+}
+
+.legal-page a:focus-visible {
+  outline: 2px solid var(--brand-ink);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.legal-page .legal-home,
+.legal-page .legal-home:hover {
+  color: var(--ink);
+  text-decoration: none;
+}
+
+/* The short version: the page's main points, on a stronger surface. */
+.legal-short {
+  margin: 20px 0;
+  padding: 16px 20px 6px;
+  background: color-mix(in srgb, var(--brand) 22%, var(--surface-strong));
+}
+
+:root[data-mode="dark"] .legal-short {
+  /* The brand colours are pale: a lighter touch of them on the dark page. */
+  background: color-mix(in srgb, var(--brand) 9%, var(--surface-strong));
+  border: 1px solid var(--surface-border);
+  border-radius: 16px;
+}
+
+.legal-short h2 {
+  margin-top: 0;
+}
+
+.legal-toc {
+  margin: 20px 0 8px;
+}
+
+.legal-toc ol {
+  columns: 2;
+  column-gap: 32px;
+}
+
+.legal-toc li {
+  break-inside: avoid;
+}
+
+/* The table scrolls on its own on a narrow screen, never the page. */
+.legal-table {
+  overflow-x: auto;
+  margin: 12px 0 16px;
+  border: 1px solid var(--surface-border);
+  border-radius: 16px;
+}
+
+.legal-table table {
+  width: 100%;
+  min-width: 560px;
+  border-collapse: collapse;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.legal-table th,
+.legal-table td {
+  text-align: left;
+  vertical-align: top;
+  padding: 10px 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--surface-border) 45%, transparent);
+  overflow-wrap: normal;
+}
+
+.legal-table th {
+  background: var(--surface-strong);
+  font-weight: 600;
+}
+
+.legal-table tr:last-child td {
+  border-bottom: none;
+}
+
+.legal-back {
+  margin-top: 28px;
+}
+
+@media (max-width: 600px) {
+  body.legal {
+    padding: 16px 16px 32px;
+  }
+
+  .legal-page {
+    padding: 22px 18px 26px;
+    font-size: 15px;
+  }
+
+  .legal-page h1 {
+    font-size: 28px;
+  }
+
+  .legal-toc ol {
+    columns: 1;
+  }
+
+  /* The table as a card a row, each cell under its own label: three columns don't fit. */
+  .legal-table {
+    overflow-x: visible;
+  }
+
+  .legal-table table {
+    min-width: 0;
+  }
+
+  .legal-table thead {
+    display: none;
+  }
+
+  .legal-table table,
+  .legal-table tbody,
+  .legal-table tr,
+  .legal-table td {
+    display: block;
+  }
+
+  .legal-table tr {
+    padding: 10px 14px;
+    border-bottom: 1px solid color-mix(in srgb, var(--surface-border) 45%, transparent);
+  }
+
+  .legal-table tr:last-child {
+    border-bottom: none;
+  }
+
+  .legal-table td {
+    padding: 2px 0;
+    border-bottom: none;
+  }
+
+  .legal-table td[data-label="Who"] {
+    font-size: 15px;
+    padding-bottom: 4px;
+  }
+
+  .legal-table td[data-label]:not([data-label="Who"])::before {
+    content: attr(data-label);
+    display: block;
+    color: var(--muted);
+    font-size: 12px;
+  }
+}

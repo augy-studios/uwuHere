@@ -25,9 +25,10 @@ const ALIASES = new Map([
   ["/", "index.html"],
   ["/host", "host.html"],
   ["/join", "join.html"],
+  ["/privacy", "privacy.html"],
 ]);
 
-const REDIRECTING = new Set(["/index.html", "/host.html", "/join.html"]);
+const REDIRECTING = new Set(["/index.html", "/host.html", "/join.html", "/privacy.html"]);
 
 // Shipped files that are deliberately not precached, with the reason.
 const DELIBERATELY_ABSENT = new Map([
@@ -41,6 +42,9 @@ const DELIBERATELY_ABSENT = new Map([
   ["/check-precache.js", "This checker. Not part of the site."],
   ["/404.html", "Left as it was. An unknown address offline gets the home page instead."],
   ["/404.css", "As above."],
+  ["/vendor/html-to-image-1.11.13/html-to-image.js", "Report a bug's Screenshot a page loads it when it's used; sending the report needs a connection anyway."],
+  ["/vendor/html-to-image-1.11.13/LICENSE", "The library's licence. Not part of the page."],
+  ["/.env.example", "The Vercel variables' template. Never served."],
 ]);
 
 const SKIP_DIRS = new Set(["node_modules", ".git", ".well-known", "images", "api"]);

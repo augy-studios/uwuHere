@@ -3,7 +3,7 @@
 // presses something that needs it, never on page load.
 //
 // In the Android app the same API works, with Android's own location prompt
-// (android/.../AndroidManifest.xml); only the sentence for a refusal differs.
+// (flutter/android/.../AndroidManifest.xml); only the sentence for a refusal differs.
 
 import { AppBridge } from "./app-bridge.js";
 

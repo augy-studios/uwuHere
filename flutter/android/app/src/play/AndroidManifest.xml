@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A Google Play build only (build-apk.ps1 -Aab, app/build.gradle.kts's uwuherePlay). The APK
+     on GitHub keeps what's removed here.
+     The updater's permission: Play updates the app and doesn't allow it to install its own.
+     The Dart side hides the updater's buttons too (UWUHERE_PLAY), and build-apk.ps1 checks the
+     bundle's manifest really lacks the permission. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" tools:node="remove" />
+    <application>
+        <provider android:name="androidx.core.content.FileProvider" tools:node="remove" />
+    </application>
+</manifest>

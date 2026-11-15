@@ -1,4 +1,4 @@
-// The Android app (android/) keeping itself up to date. The app says its
+// The 1.0.x Android app (Capacitor) keeping itself up to date. The app says its
 // version (js/app-bridge.js), and /api/app-release the newest one on GitHub;
 // a newer one shows in the update bar (js/sw-update.js), whose Update opens
 // the app's update window (UpdateActivity.java). That downloads the APK,

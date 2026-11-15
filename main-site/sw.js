@@ -13,6 +13,7 @@
 //
 //   navigation to /host or /host.html      the cached host shell
 //   navigation to /join or /join.html      the cached attendee shell
+//   navigation to /privacy                 the cached Privacy page
 //   navigation to anything else            the cached home shell
 //   /css/**, /js/**, icons, the manifest   cache first
 //   Google Fonts                           cache first, kept across versions
@@ -49,7 +50,7 @@
 // the whole install. `node check-precache.js` keeps the list honest.
 //
 // VERSION is a plain integer, counting up by one.
-const VERSION = 11;
+const VERSION = 12;
 
 const SHELL = `uwuHere-shell-${VERSION}`;
 const FONTS = "uwuHere-fonts";
@@ -73,14 +74,16 @@ const IS_DEV =
  * ---------------------------------------------------------------------- */
 
 const PRECACHE = [
-  // The three pages.
+  // The three pages, and Privacy.
   "/",
   "/host",
   "/join",
+  "/privacy",
 
   // Styles.
   "/css/theme.css",
   "/css/app.css",
+  "/privacy.css",
 
   // Every module. A precached page whose module is missing renders its markup
   // and then does nothing.
@@ -100,6 +103,8 @@ const PRECACHE = [
   "/js/qr.js",
   "/js/password.js",
   "/js/colour-picker.js",
+  "/js/bug-report.js",
+  "/js/tour.js",
   // The Android app's side. Every page imports them through shell.js, and
   // in a browser they do nothing.
   "/js/app-bridge.js",
@@ -223,6 +228,7 @@ function shellFor(url) {
   const path = url.pathname.replace(/\/$/, "").replace(/\.html$/, "");
   if (path === "/host") return "/host";
   if (path === "/join") return "/join";
+  if (path === "/privacy") return "/privacy";
   return "/";
 }
 

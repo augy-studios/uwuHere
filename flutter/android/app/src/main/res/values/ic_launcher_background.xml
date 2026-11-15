@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The flat colour the logo sits on in HAT-main.png, so the adaptive
+         icon's background and its foreground meet without a seam. -->
+    <color name="ic_launcher_background">#CCFFCC</color>
+</resources>

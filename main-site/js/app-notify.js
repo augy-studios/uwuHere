@@ -10,7 +10,7 @@
 //             host page open anyway, so they don't notify.
 //   releases  a new version of the app, pushed by api/push/release.js when a
 //             release is published on GitHub
-//   news      sent by hand from the Firebase console (android/FIREBASE-SETUP.md)
+//   news      sent by hand from the Firebase console (flutter/FIREBASE-SETUP.md)
 //
 // The host page names its event with watchHostAlerts() whenever it opens,
 // and takes it off when the event ends; the app joins the topic while
