@@ -47,6 +47,32 @@ test("the events pane and the open page side by side; the command bar finds even
   noErrors(page);
 });
 
+// The title bar sits above the app's Navigator: its app buttons open their sheets through the
+// Navigator's context, or they'd do nothing at all (as in 2.0.0's desktop apps).
+test("the title bar's app buttons open their sheets, on home and on an event", async ({ page }) => {
+  const db = await mockApi(page);
+  const a = makeEvent(db, { title: "Title bar" });
+  await seed(page, { "uwuhere.hosted": hosted(a) });
+  await openApp(page, "?desktop=1", { ready: homeReady });
+  const opens = async (name, heading) => {
+    await button(page, name).click();
+    await expect(page.getByRole("heading", { name: heading })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("heading", { name: heading })).toHaveCount(0);
+  };
+  for (const round of ["home", "event"]) {
+    if (round === "event") {
+      await page.getByRole("button", { name: /^Title bar/ }).click();
+      await expect(page.getByRole("heading", { name: "Title bar" })).toBeVisible();
+    }
+    await opens("Notifications", "Notifications");
+    await opens("Report a bug", "Report a bug");
+    await opens("Show me around", "Show me around");
+    await opens("Theme", "Theme");
+  }
+  noErrors(page);
+});
+
 // What the person asked for on the desktop: the pointing hand over buttons and everything else
 // that can be pressed. Flutter on the web shows it by setting the cursor on its view.
 test("a pointing hand over everything pressable", async ({ page }) => {

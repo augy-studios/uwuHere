@@ -16,6 +16,7 @@ import '../../native/bridge.dart';
 import '../../theme/theme.dart';
 import '../../widgets/common.dart';
 import '../../widgets/sheet.dart';
+import '../update/update_bar.dart';
 
 const _switches = [
   (topic: 'checkins', label: 'Check-ins to my events', hint: 'Who checks in by location or leaves early, at events this device hosts'),
@@ -66,7 +67,9 @@ class _NotifySheetState extends State<_NotifySheet> with WidgetsBindingObserver 
       final t = await Native.call('Here', 'topics');
       if (!mounted) return;
       setState(() {
-        _on = {for (final s in _switches) s.topic: t?[s.topic] == true};
+        // A switch still being changed keeps where it was put: Android's permission dialog
+        // brings the app back (and here) before the change is stored.
+        _on = {for (final s in _switches) s.topic: _busy.contains(s.topic) ? (_on[s.topic] ?? false) : t?[s.topic] == true};
         // Turned on here, then switched off in Android's settings: say why nothing arrives.
         final denied = t?['permission'] == 'denied';
         if (_on.values.any((v) => v) && denied) {
@@ -91,6 +94,9 @@ class _NotifySheetState extends State<_NotifySheet> with WidgetsBindingObserver 
     });
     try {
       await Native.call('Here', 'setTopic', {'topic': topic, 'on': on});
+      if (mounted) setState(() => _on[topic] = on);
+      // The Updates page has the same switch for new versions.
+      if (topic == 'releases') AndroidUpdates.I.readNotices();
     } on NativeError catch (e) {
       if (!mounted) return;
       setState(() {

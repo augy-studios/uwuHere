@@ -6,7 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:uwuhere/features/update/release_notes.dart';
 
 void main() {
-  for (final v in ['1.0.0', '1.0.1', '1.0.2', '1.0.3', '2.0.0']) {
+  for (final v in ['1.0.0', '1.0.1', '1.0.2', '1.0.3', '2.0.0', '2.0.1']) {
     test('$v: a summary and groups of titled items, the download table and install steps left out', () {
       final n = ReleaseNotes.parse(File('../announcements/release-notes-$v.md').readAsStringSync());
       expect(n.summary, isNotEmpty);

@@ -268,6 +268,9 @@ class _DesktopChromeState extends State<DesktopChrome> {
 
   void _submit(String text) {
     _focus.unfocus();
+    // Used, so emptied: at rest the bar shows the open page's title, and the next search starts
+    // from nothing.
+    _search.clear();
     final t = text.trim();
     if (t.isEmpty) return;
     if (parseLink(t) != null) {
@@ -350,6 +353,7 @@ class _DesktopChromeState extends State<DesktopChrome> {
                               ),
                               onTap: () {
                                 _focus.unfocus();
+                                _search.clear();
                                 h.run();
                               },
                             ),

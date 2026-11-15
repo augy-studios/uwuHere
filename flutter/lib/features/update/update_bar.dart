@@ -91,12 +91,7 @@ class AndroidUpdates extends ChangeNotifier with WidgetsBindingObserver {
     _started = true;
     WidgetsBinding.instance.addObserver(this);
     notices = Store.I.get(_releasesKey) == '1';
-    // The Notifications window's switch and this one are the same topic: read where it's kept.
-    Native.tryCall('Here', 'topics').then((t) {
-      if (t == null) return;
-      notices = t['releases'] == true;
-      notifyListeners();
-    });
+    readNotices();
     // The notification "x.y.z is out", tapped: this page.
     Native.on('App', 'openUpdates', (_) => openUpdates());
     check();
@@ -180,6 +175,16 @@ class AndroidUpdates extends ChangeNotifier with WidgetsBindingObserver {
                 ? 'Allow uwuHere to install apps, then press Update again.'
                 : 'Couldn’t download the update. Check your connection and try again.');
     }
+    notifyListeners();
+  }
+
+  /// The Notifications sheet's switch and this one are the same topic: read where it's kept, as
+  /// the app starts, each time the Updates page opens, and after the sheet changes it.
+  Future<void> readNotices() async {
+    final t = await Native.tryCall('Here', 'topics');
+    if (t == null || notices == null) return;
+    notices = t['releases'] == true;
+    Store.I.put(_releasesKey, notices! ? '1' : '0');
     notifyListeners();
   }
 
@@ -305,6 +310,7 @@ Future<void> openUpdates({bool check = false}) async {
   final nav = AppNav.navigatorKey.currentState;
   if (nav == null) return;
   AndroidUpdates.I.check(fresh: true, asked: check);
+  AndroidUpdates.I.readNotices();
   await nav.push(
     MaterialPageRoute<void>(
       builder: (_) => const UpdatesPage(),

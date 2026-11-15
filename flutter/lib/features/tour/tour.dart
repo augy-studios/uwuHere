@@ -396,7 +396,12 @@ class _TourLayerState extends State<_TourLayer> with SingleTickerProviderStateMi
                 Positioned(
                   top: pad.top + 10,
                   left: pad.left + 14,
-                  child: OutlinedButton(onPressed: Tour.end, child: const Text('Skip')),
+                  // Filled, so the page under it (the app's name, on a phone) doesn't show through.
+                  child: OutlinedButton(
+                    onPressed: Tour.end,
+                    style: OutlinedButton.styleFrom(backgroundColor: c.surfaceStrong, foregroundColor: c.ink),
+                    child: const Text('Skip'),
+                  ),
                 ),
               ],
             ),

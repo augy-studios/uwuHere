@@ -36,6 +36,10 @@ that prefix: it's how the Android app's updater (and the 1.0.x app's) finds its 
 
    Each checks its signature against the app's key, and the bundle that nothing of the updater or
    the advertising ID is left in it. Both are shrunk and obfuscated, as Google Play asks.
+   **Then open the APK on a phone or emulator** before going on (`adb install -r` it, open it, make
+   an event, turn a notification on). The Playwright suite runs the app in a browser, never the
+   shrunk build, and R8 can remove something Android only asks for by name: 2.0.0 closed as soon as
+   it opened for that reason (`flutter/android/app/proguard-rules.pro`).
 3. **Deploy the site first** if this release needs anything new from it (the Updates page reads
    `/api/app-release`, Report a bug posts to `/api/bug-report`).
 4. **Commit the code, `pubspec.yaml` and `release/<version>/`** and push.

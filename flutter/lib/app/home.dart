@@ -27,13 +27,19 @@ import 'nav.dart';
 import 'pages.dart';
 
 /// The app's own buttons, after the page's: in the Edge Tray, and in the desktop's title bar.
-List<TrayItem> appTrayItems(BuildContext context) => [
-  if (Native.has('push') || Env.desktop) TrayItem(icon: 'bell', label: 'Notifications', onTap: () => openNotifySheet(context)),
-  if (Env.android && !isPlayBuild) TrayItem(icon: 'appUpdate', label: 'Check for updates', onTap: () => openUpdates(check: true)),
-  TrayItem(icon: 'bug', label: 'Report a bug', onTap: () => openBugReport(context), tourId: 'tray-bug'),
-  TrayItem(icon: 'help', label: 'Show me around', onTap: () => openTourPicker(context), tourId: 'tray-tour'),
-  TrayItem(icon: ThemeController.I.brightness == Brightness.dark ? 'moon' : 'sun', label: 'Theme', onTap: () => openThemeSheet(context), tourId: 'tray-theme'),
-];
+/// The app's own buttons, for the Edge Tray and the desktop's title bar. Each opens its sheet from
+/// the Navigator's context when there is one: the title bar sits above the Navigator, and a sheet
+/// opened from its own context has no route to go on, so nothing would open.
+List<TrayItem> appTrayItems(BuildContext context) {
+  BuildContext at() => AppNav.context ?? context;
+  return [
+    if (Native.has('push') || Env.desktop) TrayItem(icon: 'bell', label: 'Notifications', onTap: () => openNotifySheet(at())),
+    if (Env.android && !isPlayBuild) TrayItem(icon: 'appUpdate', label: 'Check for updates', onTap: () => openUpdates(check: true)),
+    TrayItem(icon: 'bug', label: 'Report a bug', onTap: () => openBugReport(at()), tourId: 'tray-bug'),
+    TrayItem(icon: 'help', label: 'Show me around', onTap: () => openTourPicker(at()), tourId: 'tray-tour'),
+    TrayItem(icon: ThemeController.I.brightness == Brightness.dark ? 'moon' : 'sun', label: 'Theme', onTap: () => openThemeSheet(at()), tourId: 'tray-theme'),
+  ];
+}
 
 class Home extends StatefulWidget {
   const Home({super.key});
