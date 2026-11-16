@@ -32,6 +32,14 @@ linter:
   rules:
     # avoid_print: false  # Uncomment to disable the `avoid_print` rule
     # prefer_single_quotes: true  # Uncomment to enable the `prefer_single_quotes` rule
+    # This project spells out shorthand on purpose so the code reads plainly for anyone
+    # with a basic grasp of Dart: if/else instead of `?:` and `??`, explicit null checks
+    # instead of `?.`, and block bodies instead of `=>`. These lints suggest the opposite.
+    prefer_if_null_operators: false
+    prefer_null_aware_operators: false
+    prefer_conditional_assignment: false
+    unnecessary_lambdas: false
+    prefer_null_aware_method_calls: false
 
 # Additional information about this file can be found at
 # https://dart.dev/guides/language/analysis-options
