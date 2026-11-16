@@ -227,6 +227,9 @@ bool FlutterWindow::SetBackdrop(const std::string& kind, bool dark) {
   ::DwmExtendFrameIntoClientArea(hwnd, &margins);
   if (!shown) backdrop_ = false;
   SetCaptionColour();
+  // The frame is worked out again, for the extended frame to take.
+  ::SetWindowPos(hwnd, nullptr, 0, 0, 0, 0,
+                 SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
   return shown;
 }
 

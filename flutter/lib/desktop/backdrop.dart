@@ -15,6 +15,7 @@
 import 'package:flutter/material.dart';
 
 import '../theme/theme.dart';
+import 'desk.dart';
 import 'runner.dart';
 
 class Backdrop {
@@ -24,6 +25,16 @@ class Backdrop {
 
   static void start() {
     ThemeController.I.addListener(_apply);
+    // window_manager's setTitleBarStyle (as the window first opens, after the splash) and full
+    // screen put the window's frame back to its own, which takes Mica's area away: the pane stayed
+    // black until the look was changed. So it's asked for again after each.
+    Desktop.onShown.add(_again);
+    Desktop.fullScreen.addListener(_again);
+    _apply();
+  }
+
+  static void _again() {
+    _asked = null;
     _apply();
   }
 

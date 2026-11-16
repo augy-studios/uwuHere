@@ -1,4 +1,4 @@
-The Fluent 2 look's title bar on Windows is white again (dark grey in dark mode), not a strip of your accent colour. This release is for computers only: the Android app stays at 2.0.1.
+The Fluent 2 look on Windows opens as it should: the events pane is no longer black, and the title bar is white (dark grey in dark mode), not a strip of your accent colour. This release is for computers only: the Android app stays at 2.0.1.
 
 ## Download
 
@@ -21,4 +21,5 @@ On Android, `uwuhere-2.0.1.apk` is on the [2.0.1 release](https://github.com/aug
 ## What's fixed
 
 ### Windows app
+- **No more black pane**: in the Fluent 2 look, the events pane and the title bar opened black, with dark writing on them, until the look was changed. Mica now shows behind them from the start.
 - **Fluent 2's title bar**: with **Show accent colour on title bars and window borders** turned on in Windows' settings, a solid strip of the accent colour covered the top of the window, behind the search bar and the buttons. The title bar is now white, or Fluent's dark grey in dark mode, as Windows 11's own apps have it.
