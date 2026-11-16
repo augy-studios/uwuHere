@@ -448,12 +448,17 @@ class _DesktopChromeState extends State<DesktopChrome> {
 
   Widget _bar(BuildContext context) {
     final c = UwuColors.of(context);
-    // In the systems' glass the title bar is the window's own backdrop (Mica, the vibrancy, the
-    // glows), as Windows 11's, macOS's and COSMIC's are, and writes in the page's ink.
+    // In the systems' glass the title bar writes in the page's ink. On macOS and Linux it's the
+    // window's own backdrop (the vibrancy, the blur, the glows), as macOS's and COSMIC's are; in
+    // Fluent 2 it's solid, white in light mode and Fluent's dark base in dark, over Mica.
     final native = c.native;
     final brand = c.glass ? ThemeController.I.colorTheme.color : c.brandFill;
-    final dark = c.glass && ThemeController.I.brightness == Brightness.dark;
-    final bg = native ? Colors.transparent : (dark ? Color.lerp(brand, Colors.black, 0.72)! : brand);
+    final dark = (c.glass || native) && ThemeController.I.brightness == Brightness.dark;
+    final bg = c.kind == GlassKind.fluent
+        ? (dark ? const Color(0xFF202020) : Colors.white)
+        : native
+        ? Colors.transparent
+        : (dark ? Color.lerp(brand, Colors.black, 0.72)! : brand);
     final ink = native
         ? c.ink
         : (ThemeData.estimateBrightnessForColor(bg) == Brightness.dark

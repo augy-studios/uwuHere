@@ -1,0 +1,9 @@
+✨UPDATE✨ uwuHere 2.0.3: Fluent 2's title bar, fixed
+here.uwuapps.org
+
+Windows app:
+- The Fluent 2 look's title bar is white (dark grey in dark mode), not a strip of your accent colour
+
+The apps update themselves (Restart to update). The Android app stays at 2.0.1.
+
+Download the apps and view patch notes: github.com/augy-studios/uwuHere/releases/latest

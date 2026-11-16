@@ -21,6 +21,10 @@ namespace {
 
 // DWMWA_USE_IMMERSIVE_DARK_MODE, by number for older SDKs.
 constexpr DWORD kImmersiveDarkMode = 20;
+// DWMWA_CAPTION_COLOR (Windows 11), and its "draw none" and "the system's" values.
+constexpr DWORD kCaptionColor = 35;
+constexpr COLORREF kColorNone = 0xFFFFFFFE;
+constexpr COLORREF kColorDefault = 0xFFFFFFFF;
 constexpr wchar_t kAppId[] = L"org.uwuapps.here";
 constexpr int kThumbPrevious = 1001;
 constexpr int kThumbPlay = 1002;
@@ -222,7 +226,18 @@ bool FlutterWindow::SetBackdrop(const std::string& kind, bool dark) {
   MARGINS margins = shown ? MARGINS{-1, -1, -1, -1} : MARGINS{0, 0, 0, 0};
   ::DwmExtendFrameIntoClientArea(hwnd, &margins);
   if (!shown) backdrop_ = false;
+  SetCaptionColour();
   return shown;
+}
+
+// With the frame extended over the window, Windows paints its hidden caption's strip across the
+// top of the page, in the accent colour where "Show accent colour on title bars" is on, over the
+// app's own title bar. With the backdrop on it draws none, so Mica shows there as everywhere else.
+void FlutterWindow::SetCaptionColour() {
+  HWND hwnd = GetHandle();
+  if (!hwnd) return;
+  const COLORREF colour = backdrop_ ? kColorNone : kColorDefault;
+  ::DwmSetWindowAttribute(hwnd, kCaptionColor, &colour, sizeof(colour));
 }
 
 void FlutterWindow::OnDestroy() {
@@ -345,6 +360,7 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
         const LRESULT handled = Win32Window::MessageHandler(hwnd, message, wparam, lparam);
         BOOL d = backdrop_dark_ ? TRUE : FALSE;
         ::DwmSetWindowAttribute(hwnd, kImmersiveDarkMode, &d, sizeof(d));
+        SetCaptionColour();
         return handled;
       }
       break;

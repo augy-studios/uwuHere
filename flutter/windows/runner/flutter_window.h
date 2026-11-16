@@ -38,6 +38,7 @@ class FlutterWindow : public Win32Window {
   void UpdateThumbButtons();
   void OnThumb(int button);
   bool SetBackdrop(const std::string& kind, bool dark);
+  void SetCaptionColour();
 
   flutter::DartProject project_;
   std::unique_ptr<flutter::FlutterViewController> flutter_controller_;
