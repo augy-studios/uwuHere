@@ -23,4 +23,12 @@ add_definitions(-DAPPLICATION_ID="${APPLICATION_ID}")
 target_link_libraries(${BINARY_NAME} PRIVATE flutter)
 target_link_libraries(${BINARY_NAME} PRIVATE PkgConfig::GTK)
 
+# Xlib, for the compositor's blur behind the window (my_application.cc's set_blur), where GTK
+# runs on X11.
+pkg_check_modules(X11 IMPORTED_TARGET x11)
+if(X11_FOUND)
+  target_link_libraries(${BINARY_NAME} PRIVATE PkgConfig::X11)
+  target_compile_definitions(${BINARY_NAME} PRIVATE UWUHERE_X11)
+endif()
+
 target_include_directories(${BINARY_NAME} PRIVATE "${CMAKE_SOURCE_DIR}")

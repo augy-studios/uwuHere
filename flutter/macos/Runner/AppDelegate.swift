@@ -3,7 +3,8 @@ import FlutterMacOS
 
 // The app's own channel to macOS (org.uwuapps.here/desktop, lib/desktop/runner.dart): the Dock's
 // menu of your events and its badge; uwu://here/ links opened from elsewhere; a click on the
-// Dock icon bringing the window back. Closing the window leaves the app running in the menu bar.
+// Dock icon bringing the window back; the window's vibrancy for the macOS Tahoe look. Closing
+// the window leaves the app running in the menu bar.
 @main
 class AppDelegate: FlutterAppDelegate {
   var channel: FlutterMethodChannel?
@@ -34,6 +35,13 @@ class AppDelegate: FlutterAppDelegate {
       case "setBadge":
         NSApp.dockTile.badgeLabel = (call.arguments as? String).flatMap { $0.isEmpty ? nil : $0 }
         result(nil)
+      case "setBackdrop":
+        // { kind: "vibrancy" | "none", dark } (lib/desktop/backdrop.dart): the main window's.
+        let args = call.arguments as? [String: Any]
+        let kind = args?["kind"] as? String ?? "none"
+        let dark = args?["dark"] as? Bool ?? false
+        let content = NSApp.windows.lazy.compactMap { $0.contentViewController as? BackdropViewController }.first
+        result(content?.setBackdrop(on: kind == "vibrancy", dark: dark) ?? false)
       default:
         result(FlutterMethodNotImplemented)
       }

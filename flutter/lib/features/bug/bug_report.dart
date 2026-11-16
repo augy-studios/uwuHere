@@ -138,6 +138,7 @@ class BugShot {
       final box = AppNav.repaintKey.currentContext?.findRenderObject();
       if (box is! RenderRepaintBoundary) return null;
       shot = await box.toImage(pixelRatio: math.min(2, ratio));
+      if (context.mounted) shot = await PageShots.solid(shot, UwuColors.of(context));
     }
     final png = await shot.toByteData(format: ui.ImageByteFormat.png);
     shot.dispose();

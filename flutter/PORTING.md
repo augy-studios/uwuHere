@@ -19,7 +19,7 @@ the API's shapes, the same-wifi protocol and the words are the site's own throug
 | `js/geo.js` one reading, with sentences | `lib/data/geo.dart` (geolocator; Linux's Wi-Fi fallback in `lib/desktop/location.dart`) | Done |
 | `js/ui.js` ink, label size, times, armed buttons | `lib/data/format.dart`, the screens | Done |
 | `js/tray.js` the Edge Tray | `lib/widgets/edge_tray.dart` | Done, under the same key |
-| `js/theme.js` brand colours, light, dark, time-based | `lib/theme/theme.dart`, `lib/features/theme/theme_sheet.dart` | Done, plus Material You |
+| `js/theme.js` brand colours, light, dark, time-based | `lib/theme/theme.dart`, `lib/features/theme/theme_sheet.dart` | Done, plus Material You (Android) and the system's glass (desktop) |
 | `js/tour.js` first-visit tours | `lib/features/tour/tour.dart` | Done, under the same keys |
 | `js/bug-report.js` Report a bug, Screenshot a page | `lib/features/bug/bug_report.dart` | Done: Screenshot a page takes the whole page |
 | `js/sw-update.js`, `js/app-update.js` the update bar | `lib/features/update/update_bar.dart`, `lib/desktop/updater.dart` | Done, as the app's own updater and Updates page (Android), and the desktop's |

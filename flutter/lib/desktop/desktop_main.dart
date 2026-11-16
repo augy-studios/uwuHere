@@ -30,6 +30,7 @@ import '../native/bridge.dart';
 import '../theme/theme.dart';
 import 'adaptive.dart';
 import 'alerts_poll.dart';
+import 'backdrop.dart';
 import 'chrome.dart';
 import 'desk.dart';
 import 'glance.dart';
@@ -107,7 +108,14 @@ void _stepEvent(int by) {
 /// the widgets, links, start at sign-in, and the update checks.
 Future<void> desktopAfterApp(List<String> args) async {
   desktopChrome = (context, child) => DesktopChrome(child: child);
-  desktopAccentScheme = (b) => ColorScheme.fromSeed(seedColor: _systemAccent(), brightness: b);
+  // The system's accent, read now and again whenever the window comes back to the front (it may
+  // have been changed in the system's settings meanwhile): the system's glass is in it, and the
+  // UwU Apps look can use it in place of the brand colour.
+  ThemeController.I.setSystemAccentColor(_readAccent(_runSync));
+  AppLifecycleListener(
+    onResume: () async => ThemeController.I.setSystemAccentColor(_readAccent(await _runAll(_accentCommands()))),
+  );
+  desktopAccentScheme = (b) => ColorScheme.fromSeed(seedColor: ThemeController.I.systemAccentColor ?? const Color(0xFF22A85A), brightness: b);
   desktopAccentGet = () => ThemeController.I.systemAccent;
   desktopAccentSet = (on) {
     DeskSettings.write({'useSystemAccent': on});
@@ -123,6 +131,7 @@ Future<void> desktopAfterApp(List<String> args) async {
   ]);
   ViewHistory.start();
   Runner.listen();
+  Backdrop.start();
   Runner.onDock = (code) => Desktop.show('uwu://here/host?id=$code');
   // The taskbar's thumbnail buttons: refresh what's on show where it is, or the event before or
   // after the open one.
@@ -175,19 +184,47 @@ Future<void> desktopAfterApp(List<String> args) async {
   Updater.start();
 }
 
-/// The system's accent colour where it can be read, else uwuHere's green.
-Color _systemAccent() {
+/// The commands that say the system's accent: Windows' DWM accent, macOS's AppleAccentColor,
+/// GNOME's accent-color and Deepin's active colour.
+List<List<String>> _accentCommands() {
+  if (Platform.isWindows) return [['reg', 'query', r'HKCU\Software\Microsoft\Windows\DWM', '/v', 'AccentColor']];
+  if (Platform.isMacOS) return [['defaults', 'read', '-g', 'AppleAccentColor']];
+  return [
+    ['gsettings', 'get', 'org.gnome.desktop.interface', 'accent-color'],
+    ['gsettings', 'get', 'com.deepin.dde.appearance', 'qt-active-color'],
+  ];
+}
+
+/// What each command printed ('' for one that failed), at start-up, before the first frame.
+List<String> get _runSync => [
+  for (final c in _accentCommands())
+    (() {
+      try {
+        return '${Process.runSync(c.first, c.sublist(1)).stdout}';
+      } catch (_) {
+        return '';
+      }
+    })(),
+];
+
+/// The same, later, without holding up the window.
+Future<List<String>> _runAll(List<List<String>> commands) => Future.wait([
+  for (final c in commands)
+    Process.run(c.first, c.sublist(1)).then((r) => '${r.stdout}').catchError((_) => ''),
+]);
+
+/// The system's accent colour from what [_accentCommands] printed, or COSMIC's from its theme
+/// file, or null where none can be read.
+Color? _readAccent(List<String> out) {
   try {
     if (Platform.isWindows) {
-      final r = Process.runSync('reg', ['query', r'HKCU\Software\Microsoft\Windows\DWM', '/v', 'AccentColor']);
-      final m = RegExp(r'0x([0-9a-fA-F]{8})').firstMatch('${r.stdout}');
-      if (m != null) {
-        // ABGR.
-        final v = int.parse(m.group(1)!, radix: 16);
-        return Color.fromARGB(255, v & 0xff, (v >> 8) & 0xff, (v >> 16) & 0xff);
-      }
-    } else if (Platform.isMacOS) {
-      final r = Process.runSync('defaults', ['read', '-g', 'AppleAccentColor']);
+      final m = RegExp(r'0x([0-9a-fA-F]{8})').firstMatch(out.first);
+      if (m == null) return null;
+      // ABGR.
+      final v = int.parse(m.group(1)!, radix: 16);
+      return Color.fromARGB(255, v & 0xff, (v >> 8) & 0xff, (v >> 16) & 0xff);
+    }
+    if (Platform.isMacOS) {
       const accents = {
         '-1': Color(0xFF8E8E93),
         '0': Color(0xFFFF3B30),
@@ -197,23 +234,40 @@ Color _systemAccent() {
         '5': Color(0xFFAF52DE),
         '6': Color(0xFFFF2D55),
       };
-      return accents['${r.stdout}'.trim()] ?? const Color(0xFF007AFF);
-    } else {
-      final r = Process.runSync('gsettings', ['get', 'org.gnome.desktop.interface', 'accent-color']);
-      const accents = {
-        'blue': Color(0xFF3584E4),
-        'teal': Color(0xFF2190A4),
-        'green': Color(0xFF3A944A),
-        'yellow': Color(0xFFC88800),
-        'orange': Color(0xFFED5B00),
-        'red': Color(0xFFE62D42),
-        'pink': Color(0xFFD56199),
-        'purple': Color(0xFF9141AC),
-        'slate': Color(0xFF6F8396),
-      };
-      final c = accents['${r.stdout}'.replaceAll("'", '').trim()];
-      if (c != null) return c;
+      // Unset is the multicolour default: blue.
+      return accents[out.first.trim()] ?? const Color(0xFF007AFF);
     }
-  } catch (_) {}
-  return const Color(0xFF22A85A);
+    const gnome = {
+      'blue': Color(0xFF3584E4),
+      'teal': Color(0xFF2190A4),
+      'green': Color(0xFF3A944A),
+      'yellow': Color(0xFFC88800),
+      'orange': Color(0xFFED5B00),
+      'red': Color(0xFFE62D42),
+      'pink': Color(0xFFD56199),
+      'purple': Color(0xFF9141AC),
+      'slate': Color(0xFF6F8396),
+    };
+    final desktop = (Platform.environment['XDG_CURRENT_DESKTOP'] ?? '').toUpperCase();
+    // Deepin's: '#0081FF'.
+    if (desktop.contains('DEEPIN') || desktop.contains('DDE')) {
+      final m = RegExp(r'#([0-9a-fA-F]{6})').firstMatch(out.length > 1 ? out[1] : '');
+      if (m != null) return Color(0xFF000000 | int.parse(m.group(1)!, radix: 16));
+    }
+    // COSMIC's: its theme's accent, as red, green and blue from 0 to 1.
+    if (desktop.contains('COSMIC')) {
+      final home = Platform.environment['HOME'] ?? '';
+      final config = Platform.environment['XDG_CONFIG_HOME'] ?? '$home/.config';
+      for (final mode in ['Dark', 'Light']) {
+        final f = File('$config/cosmic/com.system76.CosmicTheme.$mode.Builder/v1/accent');
+        if (!f.existsSync()) continue;
+        double? part(String name) => double.tryParse(RegExp('$name:\\s*([0-9.]+)').firstMatch(f.readAsStringSync())?.group(1) ?? '');
+        final r = part('red'), g = part('green'), b = part('blue');
+        if (r != null && g != null && b != null) return Color.from(alpha: 1, red: r.clamp(0, 1), green: g.clamp(0, 1), blue: b.clamp(0, 1));
+      }
+    }
+    return gnome[out.first.replaceAll("'", '').trim()];
+  } catch (_) {
+    return null;
+  }
 }

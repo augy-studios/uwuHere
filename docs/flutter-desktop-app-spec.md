@@ -177,6 +177,23 @@ enforces desktop interaction patterns across shared widgets:
   colour"*, which reads the OS accent colour (Windows DWM accent, macOS system accent, Linux
   portal/GTK accent) for primary highlights while keeping the product's own neutral surfaces and
   fonts—avoiding a full phone-like Material You pastel wash on desktop.
+- **The system's glass as the second look, in Material You's place**: the Theme window offers the
+  product's look first and then each system's own design at its glassiest, the nearest each gets
+  to iOS's Liquid Glass, always in the OS accent colour:
+  - **Windows: Fluent 2 (Acrylic & Mica)**: Mica behind the window (`DWMWA_SYSTEMBACKDROP_TYPE`,
+    Windows 11 22H2+), Acrylic panels and dialogs, Segoe UI Variable, 4 px controls and 8 px
+    panels, the page on a layer with a rounded top-left corner beside the events pane.
+  - **macOS: macOS Tahoe (Liquid Glass)**: the window's vibrancy (`NSVisualEffectView`) behind the
+    page, glass panels that catch the light along a bright rim, toolbar buttons grouped in glass
+    capsules, capsule buttons, a floating glass sidebar, San Francisco.
+  - **Linux: Frosted Glass (Deepin DDE & COSMIC)**: frosted panels with a bright top edge, round
+    corners, a floating sidebar; the compositor's own blur behind the window where it offers one
+    (`_KDE_NET_WM_BLUR_BEHIND_REGION`, KWin and Deepin's deepin-kwin on X11). Deepin's and COSMIC's
+    accent colours are read as well as GNOME's.
+  Where the system can't show its material (Windows 10, Wayland, no compositor), soft glows in the
+  accent stand in for the wallpaper so the glass still has something to blur. Writing stays at
+  4.5:1 and control edges at 3:1 on every surface, in any accent. A desktop that had chosen
+  Material You opens in the system's glass.
 
 ### 2.7 The runner's native channel
 
@@ -184,9 +201,9 @@ One `MethodChannel` per runner (`<app-id>/desktop`) for what no package does:
 
 | Platform | Methods |
 |---|---|
-| Windows (C++) | single instance (a named mutex; the second copy sends its command line to the first with `WM_COPYDATA` and exits); the AppUserModelID (`SetCurrentProcessExplicitAppUserModelID`); Jump List tasks (`ICustomDestinationList` with `IShellLink`s to the exe plus a link argument); thumbnail toolbar buttons (`ITaskbarList3::ThumbBarAddButtons` and `ThumbBarUpdateButtons`, clicks from `WM_COMMAND` with `THBN_CLICKED`), with icons drawn in code |
-| macOS (Swift) | URL events (`application(_:open:)`), the Dock badge (`NSApp.dockTile.badgeLabel`), the Dock menu (`applicationDockMenu`), login items (`SMAppService.mainApp`), keeping the app alive with no window (`applicationShouldTerminateAfterLastWindowClosed` false), reopen on Dock click |
-| Linux (C) | single instance and forwarding (`G_APPLICATION_HANDLES_COMMAND_LINE` on a unique `GtkApplication`; the primary instance gets the second's arguments) |
+| Windows (C++) | single instance (a named mutex; the second copy sends its command line to the first with `WM_COPYDATA` and exits); the AppUserModelID (`SetCurrentProcessExplicitAppUserModelID`); Jump List tasks (`ICustomDestinationList` with `IShellLink`s to the exe plus a link argument); thumbnail toolbar buttons (`ITaskbarList3::ThumbBarAddButtons` and `ThumbBarUpdateButtons`, clicks from `WM_COMMAND` with `THBN_CLICKED`), with icons drawn in code; Mica behind the window (`setBackdrop`) |
+| macOS (Swift) | the window's vibrancy behind the Flutter view (`setBackdrop`); URL events (`application(_:open:)`), the Dock badge (`NSApp.dockTile.badgeLabel`), the Dock menu (`applicationDockMenu`), login items (`SMAppService.mainApp`), keeping the app alive with no window (`applicationShouldTerminateAfterLastWindowClosed` false), reopen on Dock click |
+| Linux (C) | single instance and forwarding (`G_APPLICATION_HANDLES_COMMAND_LINE` on a unique `GtkApplication`; the primary instance gets the second's arguments); the compositor's blur behind the window (`setBackdrop`) |
 
 Events come back to Dart on the same channel (`open` with a link, `thumb` with a button id,
 `dock` with a menu index, `activate`).
@@ -403,7 +420,8 @@ When the desktop app replaces one built on Electron (or any Chromium shell):
 - [ ] Title bar & shell: drag, buttons, command/search bar, `NavigationRail`, responsive Master-Detail split panes, full screen
 - [ ] Desktop UX: `VisualDensity.compact`, hover states, `AppSheet` (dialogs/side-drawers instead of bottom sheets), right-click context menus, desktop scrollbars
 - [ ] Native macOS `PlatformMenuBar` and standard desktop shortcuts (`Ctrl/Cmd+K`, `Ctrl/Cmd+,`, `Ctrl/Cmd+W`)
-- [ ] Theme: defaults to the product's brand look on desktop; optional OS accent colour
+- [ ] Theme: defaults to the product's brand look on desktop; optional OS accent colour; the
+      system's glass (Fluent 2, macOS Tahoe, Frosted Glass) as the second look
 - [ ] Runner channels: single instance and forwarding, AppUserModelID, Jump List, thumbnail
       buttons, Dock badge and menu, login items, URL events
 - [ ] Bridge host answering every call the screens make

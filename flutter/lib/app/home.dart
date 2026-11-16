@@ -19,6 +19,7 @@ import '../features/update/update_bar.dart';
 import '../native/bridge.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
+import '../widgets/common.dart';
 import '../widgets/edge_tray.dart';
 import '../widgets/page_frame.dart';
 import 'env.dart';
@@ -206,9 +207,43 @@ class _DesktopShell extends StatelessWidget {
     final c = UwuColors.of(context);
     final w = MediaQuery.sizeOf(context).width;
     if (w <= Env.splitWidth) return child;
+    final pane = KeyedSubtree(key: TourTargets.key('events-pane'), child: const EventsPane());
+    switch (c.kind) {
+      case GlassKind.fluent:
+        // Fluent 2's navigation view: the pane on the window's Mica, the page on a layer over it
+        // with a rounded top left corner and a fine edge.
+        return Row(
+          children: [
+            SizedBox(width: paneWidth, child: pane),
+            Expanded(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: c.ink.computeLuminance() > 0.5 ? Colors.white.withValues(alpha: 0.03) : Colors.white.withValues(alpha: 0.5),
+                  borderRadius: const BorderRadius.only(topLeft: Radius.circular(8)),
+                  border: Border(top: BorderSide(color: c.rimShade), left: BorderSide(color: c.rimShade)),
+                ),
+                child: ClipRRect(borderRadius: const BorderRadius.only(topLeft: Radius.circular(8)), child: child),
+              ),
+            ),
+          ],
+        );
+      case GlassKind.liquid:
+      case GlassKind.frosted:
+        // Tahoe's sidebar, and COSMIC's: a pane of glass standing off the window's edges.
+        return Row(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(8, 0, 0, 8),
+              child: SizedBox(width: paneWidth - 8, child: NativeGlass(child: pane)),
+            ),
+            Expanded(child: child),
+          ],
+        );
+      default:
+    }
     return Row(
       children: [
-        SizedBox(width: paneWidth, child: KeyedSubtree(key: TourTargets.key('events-pane'), child: const EventsPane())),
+        SizedBox(width: paneWidth, child: pane),
         VerticalDivider(width: 1, color: c.border),
         Expanded(child: child),
       ],
@@ -267,7 +302,8 @@ class _EventsPaneState extends State<EventsPane> {
     final hosted = HereStore.listHosted();
     final open = AppPages.active() == AppPages.host ? AppPages.hostCode.value : null;
     return Material(
-      color: c.surface,
+      // The systems' glass: the pane is the window's backdrop, or the glass round it.
+      color: c.native ? Colors.transparent : c.surface,
       child: ListView(
         padding: const EdgeInsets.fromLTRB(14, 16, 14, 16),
         children: [
@@ -305,31 +341,68 @@ class _EventsPaneState extends State<EventsPane> {
           for (final ev in hosted)
             Padding(
               padding: const EdgeInsets.only(bottom: 6),
-              child: Material(
-                color: ev.code == open ? c.brandFill : c.surfaceStrong,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: BorderSide(color: c.border)),
-                clipBehavior: Clip.antiAlias,
-                child: InkWell(
-                  mouseCursor: WidgetStateMouseCursor.clickable,
-                  onTap: () => AppPages.openHost(ev.code),
-                  onSecondaryTapUp: (d) => desktopEventMenu?.call(context, d.globalPosition, ev.code, ev.title.isEmpty ? 'Event ${ev.code}' : ev.title),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(ev.title.isEmpty ? 'Untitled event' : ev.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: ev.code == open ? c.onBrand : c.ink)),
-                        Text(
-                          '${ev.code} · ${formatDateTime(ev.createdAt)}${ev.ended ? ' · Ended' : ''}',
-                          style: TextStyle(color: ev.code == open ? c.onBrand : c.muted, fontSize: 12),
-                        ),
-                      ],
-                    ),
+              child: _EventRow(ev: ev, open: ev.code == open),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// One of your events in the pane. Fluent 2 marks the open one as its navigation does, with a
+/// light fill and a short accent bar at the left; the other looks fill it with the accent.
+class _EventRow extends StatelessWidget {
+  const _EventRow({required this.ev, required this.open});
+  final HostedEvent ev;
+  final bool open;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = UwuColors.of(context);
+    final fluent = c.kind == GlassKind.fluent;
+    final filled = open && !fluent;
+    final shape = RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(c.native ? c.controlRadius + 2 : 12),
+      side: BorderSide(color: c.native ? (fluent ? Colors.transparent : c.rimShade) : c.border),
+    );
+    return Material(
+      color: filled ? c.brandFill : (fluent ? (open ? c.surfaceStrong : Colors.transparent) : c.surfaceStrong),
+      shape: shape,
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        mouseCursor: WidgetStateMouseCursor.clickable,
+        onTap: () => AppPages.openHost(ev.code),
+        onSecondaryTapUp: (d) => desktopEventMenu?.call(context, d.globalPosition, ev.code, ev.title.isEmpty ? 'Event ${ev.code}' : ev.title),
+        child: Stack(
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(ev.title.isEmpty ? 'Untitled event' : ev.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: filled ? c.onBrand : c.ink)),
+                  Text(
+                    '${ev.code} · ${formatDateTime(ev.createdAt)}${ev.ended ? ' · Ended' : ''}',
+                    style: TextStyle(color: filled ? c.onBrand : c.muted, fontSize: 12),
+                  ),
+                ],
+              ),
+            ),
+            if (fluent && open)
+              Positioned(
+                left: 0,
+                top: 0,
+                bottom: 0,
+                child: Center(
+                  child: Container(
+                    width: 3,
+                    height: 18,
+                    decoration: BoxDecoration(color: c.brandInk, borderRadius: BorderRadius.circular(2)),
                   ),
                 ),
               ),
-            ),
-        ],
+          ],
+        ),
       ),
     );
   }

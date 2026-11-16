@@ -1,5 +1,6 @@
 #include "flutter_window.h"
 
+#include <dwmapi.h>
 #include <objbase.h>
 #include <propkey.h>
 #include <propvarutil.h>
@@ -18,6 +19,8 @@ using Microsoft::WRL::ComPtr;
 
 namespace {
 
+// DWMWA_USE_IMMERSIVE_DARK_MODE, by number for older SDKs.
+constexpr DWORD kImmersiveDarkMode = 20;
 constexpr wchar_t kAppId[] = L"org.uwuapps.here";
 constexpr int kThumbPrevious = 1001;
 constexpr int kThumbPlay = 1002;
@@ -161,6 +164,21 @@ bool FlutterWindow::OnCreate() {
       result->Success();
     } else if (call.method_name() == "setBadge") {
       result->Success();
+    } else if (call.method_name() == "setBackdrop") {
+      // { kind: "mica" | "acrylic" | "none", dark: bool } (lib/desktop/backdrop.dart).
+      std::string kind = "none";
+      bool dark = false;
+      if (const auto* args = std::get_if<flutter::EncodableMap>(call.arguments())) {
+        auto k = args->find(flutter::EncodableValue("kind"));
+        if (k != args->end()) {
+          if (const auto* s = std::get_if<std::string>(&k->second)) kind = *s;
+        }
+        auto d = args->find(flutter::EncodableValue("dark"));
+        if (d != args->end()) {
+          if (const auto* b = std::get_if<bool>(&d->second)) dark = *b;
+        }
+      }
+      result->Success(flutter::EncodableValue(SetBackdrop(kind, dark)));
     } else {
       result->NotImplemented();
     }
@@ -176,6 +194,35 @@ bool FlutterWindow::OnCreate() {
   flutter_controller_->ForceRedraw();
 
   return true;
+}
+
+// The system's own material behind the whole window (the system's glass look): Mica, or Acrylic,
+// through DWMWA_SYSTEMBACKDROP_TYPE, which Windows 11 has from 22H2 (build 22621). The frame is
+// extended over the whole client area so the Flutter view's see-through pixels show it, and the
+// window's dark mode follows the app's, so Mica is tinted to match. False where Windows can't.
+bool FlutterWindow::SetBackdrop(const std::string& kind, bool dark) {
+  HWND hwnd = GetHandle();
+  if (!hwnd) return false;
+  // DWMWA_SYSTEMBACKDROP_TYPE and its values (dwmapi.h in newer SDKs).
+  constexpr DWORD kSystemBackdropType = 38;
+  constexpr int kBackdropNone = 1, kBackdropMica = 2, kBackdropAcrylic = 3;
+  const int type = kind == "mica" ? kBackdropMica : kind == "acrylic" ? kBackdropAcrylic : kBackdropNone;
+  backdrop_ = type != kBackdropNone;
+  backdrop_dark_ = dark;
+
+  if (backdrop_) {
+    BOOL d = dark ? TRUE : FALSE;
+    ::DwmSetWindowAttribute(hwnd, kImmersiveDarkMode, &d, sizeof(d));
+  } else {
+    // Back to the system's own light or dark.
+    UpdateTheme(hwnd);
+  }
+  const HRESULT hr = ::DwmSetWindowAttribute(hwnd, kSystemBackdropType, &type, sizeof(type));
+  const bool shown = backdrop_ && SUCCEEDED(hr);
+  MARGINS margins = shown ? MARGINS{-1, -1, -1, -1} : MARGINS{0, 0, 0, 0};
+  ::DwmExtendFrameIntoClientArea(hwnd, &margins);
+  if (!shown) backdrop_ = false;
+  return shown;
 }
 
 void FlutterWindow::OnDestroy() {
@@ -290,6 +337,16 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
   switch (message) {
     case WM_FONTCHANGE:
       flutter_controller_->engine()->ReloadSystemFonts();
+      break;
+    case WM_DWMCOLORIZATIONCOLORCHANGED:
+      // Win32Window sets the window's dark mode to the system's here; with the backdrop on, it
+      // follows the app's instead.
+      if (backdrop_) {
+        const LRESULT handled = Win32Window::MessageHandler(hwnd, message, wparam, lparam);
+        BOOL d = backdrop_dark_ ? TRUE : FALSE;
+        ::DwmSetWindowAttribute(hwnd, kImmersiveDarkMode, &d, sizeof(d));
+        return handled;
+      }
       break;
     case WM_COMMAND:
       if (HIWORD(wparam) == THBN_CLICKED) {

@@ -20,7 +20,7 @@ The app is served on 47481 and the website on 47482.
 Query parameters: `?android=1` draws as the Android app does (its Updates page, Material You by
 default), `?wallpaper=1` pretends the phone has wallpaper colours, `?play=1` acts as the Google
 Play build, `?nonfc=1` as a phone without NFC, `?desktop=1` draws the desktop's title bar and
-events pane, `?welcome=1` the desktop's Make it yours window, `?notour=1` keeps tours from
+events pane, `?welcome=1` the desktop's Make it yours window, `?native=fluent|tahoe|frosted` (with `?desktop=1`) which system's glass the desktop's second look is, `?notour=1` keeps tours from
 starting, and `?page=host&id=CODE` or `?page=join&id=CODE` opens that page. What the app asked of its Android side is in `window.e2eCalls`, and
 `window.e2eEmit(plugin, event, json)` says what Android would have said.
 

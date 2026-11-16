@@ -71,6 +71,10 @@ class Win32Window {
   // Called when Destroy is called.
   virtual void OnDestroy();
 
+  // Update the window frame's theme to match the system theme. Protected, for FlutterWindow's
+  // backdrop (flutter_window.cpp), which hands the frame back to the system's when it's off.
+  static void UpdateTheme(HWND const window);
+
  private:
   friend class WindowClassRegistrar;
 
@@ -86,9 +90,6 @@ class Win32Window {
 
   // Retrieves a class instance pointer for |window|
   static Win32Window* GetThisFromHandle(HWND const window) noexcept;
-
-  // Update the window frame's theme to match the system theme.
-  static void UpdateTheme(HWND const window);
 
   bool quit_on_close_ = false;
 

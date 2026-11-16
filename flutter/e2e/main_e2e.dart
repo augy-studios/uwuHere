@@ -11,6 +11,8 @@
 //   ?nonfc=1       as a phone without NFC
 //   ?desktop=1     drawn as the desktop apps are: their title bar, command bar and events pane
 //   ?welcome=1     the desktop's Make it yours window
+//   ?native=fluent|tahoe|frosted   with ?desktop=1, which system's glass the second look is
+//                  (Windows', macOS's or Linux's), whatever the browser runs on
 //   ?notour=1      no tours start by themselves
 //   ?page=host|join&id=CODE   open on that page
 import 'dart:convert';
@@ -111,6 +113,8 @@ Future<void> main() async {
     runApp(WelcomeApp(done: (_) {}));
     return;
   }
+  final native = NativeStyle.values.where((v) => v.name == q['native']).firstOrNull;
+  if (native != null) ThemeController.styleOverride = native;
   if (q['desktop'] == '1') {
     Env.desktopOverride = true;
     desktopChrome = (context, child) => DesktopChrome(child: child);

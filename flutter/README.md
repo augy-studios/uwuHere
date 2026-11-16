@@ -23,7 +23,8 @@ lib/
                           bug (Report a bug), update (the Updates page)
   native/bridge.dart      the one way to platform code: Native.call / has / on
   desktop/                the desktop layer: window, tray, title bar, updater, widgets, polling
-  theme/                  Material You and the UwU Apps look; the site's icons
+  theme/                  the UwU Apps look, Material You (Android) and the system's glass
+                          (desktop: Fluent 2, macOS Tahoe, Frosted Glass); the site's icons
   widgets/                the Edge Tray, the big button, the colour wheel, the page frame
 android/                  the Gradle project: app/ (Java for NFC taps, Bluetooth, the hotspot, the
                           widgets, the updater, FCM), behind one bridge (MainActivity.java)

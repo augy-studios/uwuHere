@@ -28,11 +28,28 @@ class PageShots {
 
   /// The page drawn top to bottom, up to [maxHeight] pixels tall, or null if it isn't on screen.
   static Future<ui.Image?> whole(String page, {required double ratio, double maxHeight = 16384}) async {
-    final box = _keys[page]?.currentContext?.findRenderObject();
-    if (box is! RenderRepaintBoundary || !box.attached || !box.hasSize) return null;
+    final context = _keys[page]?.currentContext;
+    final box = context?.findRenderObject();
+    if (context == null || box is! RenderRepaintBoundary || !box.attached || !box.hasSize) return null;
     if (box.debugNeedsPaint) await Future<void>.delayed(const Duration(milliseconds: 40));
     final r = math.min(ratio, maxHeight / math.max(1, box.size.height));
-    return box.toImage(pixelRatio: r);
+    final shot = await box.toImage(pixelRatio: r);
+    if (!context.mounted) return shot;
+    return solid(shot, UwuColors.of(context));
+  }
+
+  /// A picture of the app made solid: in the systems' glass the page is see-through (the window's
+  /// backdrop shows through it), so it's laid on the page's own colour. Others are left as they are.
+  static Future<ui.Image> solid(ui.Image shot, UwuColors c) async {
+    if (!c.native) return shot;
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
+    final size = Size(shot.width.toDouble(), shot.height.toDouble());
+    canvas.drawRect(Offset.zero & size, Paint()..color = c.bg);
+    canvas.drawImage(shot, Offset.zero, Paint());
+    final out = await recorder.endRecording().toImage(shot.width, shot.height);
+    shot.dispose();
+    return out;
   }
 }
 
@@ -62,7 +79,9 @@ class PageFrame extends StatelessWidget {
             child: RepaintBoundary(
               key: PageShots.key(page),
               child: ColoredBox(
-                color: c.bg,
+                // The systems' glass lets the window's backdrop through; PageShots lays the picture
+                // on this colour instead.
+                color: c.native ? Colors.transparent : c.bg,
                 child: Center(
                   child: ConstrainedBox(
                     constraints: BoxConstraints(maxWidth: maxWidth),

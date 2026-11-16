@@ -2,9 +2,11 @@
 //   Windows  the Jump List (the events this computer hosts) and the taskbar's thumbnail buttons
 //            (previous event, refresh, next event) (windows/runner/flutter_window.cpp)
 //   macOS    the Dock menu and badge (macos/Runner/AppDelegate.swift)
+//   all      the system's own material behind the window, for the system's glass look
+//            (Mica on Windows 11, the vibrancy on macOS, the compositor's blur on Linux)
 // Events back: 'thumb' with 'toggle' (refresh), 'previous' or 'next', 'dock' with an event code, 'open' with a
-// link and 'activate' (macOS). Where the runner has no channel (Linux), every call is quietly
-// nothing.
+// link and 'activate' (macOS). Where the runner doesn't answer a call (Linux has only
+// setBackdrop), it's quietly nothing.
 import 'package:flutter/services.dart';
 
 class Runner {
@@ -53,4 +55,15 @@ class Runner {
 
   /// The Dock's badge (macOS): a few characters, or '' for none.
   static Future<void> setBadge(String text) => _call('setBadge', text);
+
+  /// The system's own material behind the window (lib/desktop/backdrop.dart): 'mica' or 'acrylic'
+  /// (Windows 11), 'vibrancy' (macOS), 'blur' (Linux, where the compositor blurs), or 'none'.
+  /// Whether the system shows it now: false where it can't, and on a runner without it.
+  static Future<bool> setBackdrop(String kind, {required bool dark}) async {
+    try {
+      return await _channel.invokeMethod<bool>('setBackdrop', {'kind': kind, 'dark': dark}) ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
 }

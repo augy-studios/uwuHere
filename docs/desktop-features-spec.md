@@ -456,7 +456,7 @@ Features of the site or the shared screens that switch on only in the desktop ap
 | An item's page & right-click menu | **Tray countdown** and **Pin to Desktop Widget** actions (§8, §9) |
 | Shared sheets & modals | Open as centred dialogs or right-hand slide-over drawers instead of bottom sheets (§5) |
 | Alerts settings | Notifications are always available (no browser permission); **New versions of the app** switch, kept by the app (§3) |
-| Appearance settings | Defaults to the product's brand look; optional **Use system accent colour** toggle (§1) |
+| Appearance settings | Defaults to the product's brand look; optional **Use system accent colour** toggle (§1); the second look is the system's own glass (Fluent 2 on Windows, macOS Tahoe on macOS, Deepin and COSMIC's Frosted Glass on Linux) in place of Material You |
 | Alerts | the every-minute check and newsfeed notifications (§7) |
 | A trip | its alerts as desktop notifications (§7) |
 | Favourites | sent to the app whenever they change (§9) |

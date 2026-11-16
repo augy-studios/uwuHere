@@ -14,6 +14,7 @@
 // site's address opens in the browser. Back and Forward step through the pages and events opened.
 // The title bar hides in full screen.
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -447,13 +448,31 @@ class _DesktopChromeState extends State<DesktopChrome> {
 
   Widget _bar(BuildContext context) {
     final c = UwuColors.of(context);
+    // In the systems' glass the title bar is the window's own backdrop (Mica, the vibrancy, the
+    // glows), as Windows 11's, macOS's and COSMIC's are, and writes in the page's ink.
+    final native = c.native;
     final brand = c.glass ? ThemeController.I.colorTheme.color : c.brandFill;
     final dark = c.glass && ThemeController.I.brightness == Brightness.dark;
-    final bg = dark ? Color.lerp(brand, Colors.black, 0.72)! : brand;
-    final ink = ThemeData.estimateBrightnessForColor(bg) == Brightness.dark
-        ? Colors.white
-        : const Color(0xFF121815);
+    final bg = native ? Colors.transparent : (dark ? Color.lerp(brand, Colors.black, 0.72)! : brand);
+    final ink = native
+        ? c.ink
+        : (ThemeData.estimateBrightnessForColor(bg) == Brightness.dark
+            ? Colors.white
+            : const Color(0xFF121815));
     final mac = Env.macOS;
+    // macOS Tahoe sets a toolbar's buttons in capsules of glass, a group to each.
+    Widget group(Widget row) => c.kind == GlassKind.liquid
+        ? Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 3),
+            child: NativeGlass(
+              shape: const StadiumBorder(),
+              fill: c.surface,
+              shadow: false,
+              padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 1),
+              child: row,
+            ),
+          )
+        : row;
     Widget tool(
       String icon,
       String label,
@@ -469,10 +488,11 @@ class _DesktopChromeState extends State<DesktopChrome> {
         child: InkWell(
           mouseCursor: WidgetStateMouseCursor.clickable,
           onTap: onTap,
-          borderRadius: BorderRadius.circular(6),
+          customBorder: c.capsule ? const StadiumBorder() : null,
+          borderRadius: c.capsule ? null : BorderRadius.circular(native ? c.controlRadius : 6),
           child: SizedBox(
             width: 32,
-            height: 30,
+            height: c.capsule ? 28 : 30,
             child: Center(
               child: AppIcon(
                 icon,
@@ -486,6 +506,28 @@ class _DesktopChromeState extends State<DesktopChrome> {
         ),
       ),
     );
+    // Copy link and the screenshots: after the app's buttons, in their capsule on Tahoe.
+    final extras = <Widget>[
+      tool('link', 'Copy link', _copyLink),
+      ValueListenableBuilder<bool>(
+        valueListenable: Screenshots.busy,
+        builder: (context, busy, _) => Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            tool(
+              'screenshot',
+              'Screenshot',
+              busy ? null : () => Screenshots.take(context),
+            ),
+            tool(
+              'screenshot-long',
+              'Long screenshot',
+              busy ? null : () => Screenshots.takeLong(context),
+            ),
+          ],
+        ),
+      ),
+    ];
     return Material(
       color: bg,
       child: SizedBox(
@@ -493,38 +535,45 @@ class _DesktopChromeState extends State<DesktopChrome> {
         child: Row(
           children: [
             SizedBox(width: mac ? 78 : 8),
-            ValueListenableBuilder<int>(
-              valueListenable: ViewHistory.changed,
-              builder: (context, _, _) => Row(
+            group(
+              Row(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  tool(
-                    'arrow-left',
-                    'Back',
-                    ViewHistory.canBack ? ViewHistory.back : null,
+                  ValueListenableBuilder<int>(
+                    valueListenable: ViewHistory.changed,
+                    builder: (context, _, _) => Row(
+                      children: [
+                        tool(
+                          'arrow-left',
+                          'Back',
+                          ViewHistory.canBack ? ViewHistory.back : null,
+                        ),
+                        tool(
+                          'arrow-right',
+                          'Forward',
+                          ViewHistory.canForward ? ViewHistory.forward : null,
+                        ),
+                      ],
+                    ),
                   ),
-                  tool(
-                    'arrow-right',
-                    'Forward',
-                    ViewHistory.canForward ? ViewHistory.forward : null,
-                  ),
+                  _reloading
+                      ? SizedBox(
+                          width: 32,
+                          child: Center(
+                            child: SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: ink,
+                              ),
+                            ),
+                          ),
+                        )
+                      : tool('refresh', 'Reload', _reload),
                 ],
               ),
             ),
-            _reloading
-                ? SizedBox(
-                    width: 32,
-                    child: Center(
-                      child: SizedBox(
-                        width: 14,
-                        height: 14,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: ink,
-                        ),
-                      ),
-                    ),
-                  )
-                : tool('refresh', 'Reload', _reload),
             Expanded(
               child: DragToMoveArea(
                 child: SizedBox(
@@ -538,32 +587,30 @@ class _DesktopChromeState extends State<DesktopChrome> {
               listenable: Listenable.merge([PageActions.items, AppPages.current, ThemeController.I]),
               builder: (context, _) {
                 final page = AppPages.active() == AppPages.home ? const <TrayItem>[] : PageActions.items.value;
+                final liquid = c.kind == GlassKind.liquid;
                 return Row(
                   children: [
-                    for (final t in page) KeyedSubtree(key: t.tourId == null ? null : TourTargets.key(t.tourId!), child: tool(t.icon, t.label, t.onTap)),
-                    if (page.isNotEmpty) Container(width: 1, height: 18, margin: const EdgeInsets.symmetric(horizontal: 4), color: ink.withValues(alpha: 0.25)),
-                    for (final t in appTrayItems(context)) tool(t.icon, t.label, t.onTap),
+                    if (page.isNotEmpty)
+                      group(
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [for (final t in page) KeyedSubtree(key: t.tourId == null ? null : TourTargets.key(t.tourId!), child: tool(t.icon, t.label, t.onTap))],
+                        ),
+                      ),
+                    if (page.isNotEmpty && !liquid) Container(width: 1, height: 18, margin: const EdgeInsets.symmetric(horizontal: 4), color: ink.withValues(alpha: 0.25)),
+                    group(
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          for (final t in appTrayItems(context)) tool(t.icon, t.label, t.onTap),
+                          if (liquid) ...extras,
+                        ],
+                      ),
+                    ),
+                    if (!liquid) ...extras,
                   ],
                 );
               },
-            ),
-            tool('link', 'Copy link', _copyLink),
-            ValueListenableBuilder<bool>(
-              valueListenable: Screenshots.busy,
-              builder: (context, busy, _) => Row(
-                children: [
-                  tool(
-                    'screenshot',
-                    'Screenshot',
-                    busy ? null : () => Screenshots.take(context),
-                  ),
-                  tool(
-                    'screenshot-long',
-                    'Long screenshot',
-                    busy ? null : () => Screenshots.takeLong(context),
-                  ),
-                ],
-              ),
             ),
             ValueListenableBuilder<String?>(
               valueListenable: Updater.ready,
@@ -615,6 +662,10 @@ class _DesktopChromeState extends State<DesktopChrome> {
 
   Widget _commandBar(UwuColors c, Color ink, Color bg) {
     final rest = _message.isNotEmpty ? _message : _pageTitle();
+    // A capsule on Tahoe, Fluent's 4 px search box, a rounded field on Linux, the site's 8 px.
+    final r = BorderRadius.circular(c.capsule ? 14 : (c.native ? math.min(c.controlRadius, 8) : 8));
+    final restFill = c.native ? c.surface : Colors.black.withValues(alpha: 0.08);
+    final restEdge = c.native ? BorderSide(color: c.rimShade) : BorderSide.none;
     return CompositedTransformTarget(
       link: _layer,
       child: ConstrainedBox(
@@ -638,9 +689,7 @@ class _DesktopChromeState extends State<DesktopChrome> {
                 decoration: InputDecoration(
                   isDense: true,
                   filled: true,
-                  fillColor: _focus.hasFocus
-                      ? c.surfaceStrong
-                      : Colors.black.withValues(alpha: 0.08),
+                  fillColor: _focus.hasFocus ? c.surfaceStrong : restFill,
                   hintText: _focus.hasFocus
                       ? 'Search your events and commands, type an event code, or paste a link'
                       : rest,
@@ -669,15 +718,15 @@ class _DesktopChromeState extends State<DesktopChrome> {
                     vertical: 6,
                   ),
                   border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: BorderSide.none,
+                    borderRadius: r,
+                    borderSide: restEdge,
                   ),
                   enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: BorderSide.none,
+                    borderRadius: r,
+                    borderSide: restEdge,
                   ),
                   focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
+                    borderRadius: r,
                     borderSide: BorderSide(color: c.brandInk, width: 1.5),
                   ),
                 ),

@@ -15,6 +15,7 @@ import 'package:pasteboard/pasteboard.dart';
 
 import '../app/nav.dart';
 import '../app/pages.dart';
+import '../theme/theme.dart';
 import '../widgets/page_frame.dart';
 import 'desk.dart';
 import 'notify.dart';
@@ -35,7 +36,9 @@ class Screenshots {
     final box = key.currentContext?.findRenderObject();
     if (box is! RenderRepaintBoundary) return null;
     if (box.debugNeedsPaint) await Future<void>.delayed(const Duration(milliseconds: 40));
-    return box.toImage(pixelRatio: ratio);
+    final shot = await box.toImage(pixelRatio: ratio);
+    final context = key.currentContext;
+    return context == null || !context.mounted ? shot : PageShots.solid(shot, UwuColors.of(context));
   }
 
   static Future<void> _save(ui.Image image, String name, String said) async {

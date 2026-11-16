@@ -41,6 +41,7 @@ Future<void> runUwuHere(List<String> args) async {
   final moved = await Migrate.run(Store.I);
 
   ThemeController.isAndroid = () => Env.android;
+  ThemeController.isDesktop = () => Env.desktop;
   ThemeController.I.init();
   Api.watchOffline();
   await Fullscreen.applySystemBars();

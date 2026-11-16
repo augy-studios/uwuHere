@@ -7,7 +7,7 @@ publish_to: 'none'
 # The version every platform shares: versionName+versionCode. build-apk.ps1 raises the code by one
 # on every build (Google Play refuses a code it has seen, and a phone only takes a higher one as an
 # update: the Capacitor app 1.0.3 was 4); raise the name for a new release.
-version: 2.0.1+8
+version: 2.0.2+8
 
 environment:
   sdk: ^3.13.0

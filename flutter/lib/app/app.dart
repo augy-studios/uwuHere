@@ -1,4 +1,5 @@
-// The app's root: the theme (the device's Material You palette when there is one), the navigator
+// The app's root: the theme (the device's Material You palette when there is one, or the
+// system's glass on the desktop, over its backdrop), the navigator
 // and messenger keys, the bug report's screenshot bar, and the desktop's chrome round all of it
 // where it applies.
 import 'package:dynamic_color/dynamic_color.dart';
@@ -8,6 +9,7 @@ import '../desktop/adaptive.dart';
 import '../features/bug/bug_report.dart';
 import '../features/update/update_bar.dart';
 import '../theme/theme.dart';
+import '../widgets/common.dart';
 import '../widgets/sheet.dart';
 import 'env.dart';
 import 'home.dart';
@@ -66,7 +68,7 @@ class _UwuHereAppState extends State<UwuHereApp> {
             ThemeData make(Brightness b, {bool hc = false}) {
               final ColorScheme? dyn = t.isMaterial
                   ? (b == Brightness.dark ? darkDynamic : lightDynamic)?.harmonized()
-                  : (t.systemAccent ? desktopAccentScheme?.call(b) : null);
+                  : (t.systemAccent && !t.isNative ? desktopAccentScheme?.call(b) : null);
               return buildTheme(
                 look: t.look,
                 brightness: b,
@@ -75,6 +77,8 @@ class _UwuHereAppState extends State<UwuHereApp> {
                 systemAccent: t.systemAccent,
                 highContrast: hc,
                 desktop: Env.desktop,
+                nativeStyle: t.nativeStyle,
+                accent: t.nativeAccent,
               );
             }
 
@@ -112,6 +116,10 @@ class _UwuHereAppState extends State<UwuHereApp> {
                 );
                 final chrome = desktopChrome;
                 if (chrome != null) app = chrome(context, app);
+                // The systems' glass: what's behind the whole window, the title bar's part too.
+                if (t.isNative) {
+                  app = Stack(fit: StackFit.expand, children: [const Positioned.fill(child: NativeBackdrop()), app]);
+                }
                 return app;
               },
               home: const Home(),

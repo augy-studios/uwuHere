@@ -10,6 +10,7 @@ import '../app/env.dart';
 import '../app/nav.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
+import '../widgets/common.dart';
 import '../widgets/sheet.dart';
 
 Future<T?> showDesktopSheet<T>(
@@ -30,18 +31,31 @@ Future<T?> showDesktopSheet<T>(
     pageBuilder: (context, _, _) {
       final c = UwuColors.of(context);
       final size = MediaQuery.sizeOf(context);
-      final panel = Material(
-        color: Theme.of(context).dialogTheme.backgroundColor,
-        shape: kind == SheetKind.drawer
-            ? Border(left: BorderSide(color: c.border))
-            : RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(18),
-                side: BorderSide(color: c.border),
-              ),
-        clipBehavior: Clip.antiAlias,
-        elevation: 12,
-        child: builder(context),
-      );
+      Widget panel;
+      if (c.native) {
+        // The systems' glass: the window floats as a pane of it over a blur of the page. A drawer
+        // stands off the window's edge, rounded all round, as Tahoe's and Fluent's panes do.
+        final shape = Theme.of(context).dialogTheme.shape ?? RoundedRectangleBorder(borderRadius: BorderRadius.circular(c.panelRadius));
+        panel = NativeGlass(
+          shape: shape,
+          fill: Theme.of(context).dialogTheme.backgroundColor,
+          child: Material(type: MaterialType.transparency, child: builder(context)),
+        );
+        if (kind == SheetKind.drawer) panel = Padding(padding: const EdgeInsets.fromLTRB(0, 8, 8, 8), child: panel);
+      } else {
+        panel = Material(
+          color: Theme.of(context).dialogTheme.backgroundColor,
+          shape: kind == SheetKind.drawer
+              ? Border(left: BorderSide(color: c.border))
+              : RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(18),
+                  side: BorderSide(color: c.border),
+                ),
+          clipBehavior: Clip.antiAlias,
+          elevation: 12,
+          child: builder(context),
+        );
+      }
       if (kind == SheetKind.drawer) {
         return Align(
           alignment: Alignment.centerRight,
@@ -103,8 +117,8 @@ Future<void> showContextMenu(BuildContext context, Offset position, List<MenuAct
     position: RelativeRect.fromRect(at & const Size(1, 1), Offset.zero & overlay.size),
     color: Color.alphaBlend(c.surfaceStrong, c.bg),
     shape: RoundedRectangleBorder(
-      borderRadius: BorderRadius.circular(10),
-      side: BorderSide(color: c.border),
+      borderRadius: BorderRadius.circular(c.native ? (c.capsule ? 14 : c.panelRadius) : 10),
+      side: BorderSide(color: c.native ? c.rimShade : c.border),
     ),
     items: [
       for (var i = 0; i < actions.length; i++)

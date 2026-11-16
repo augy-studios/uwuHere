@@ -1,8 +1,12 @@
 #include "my_application.h"
 
 #include <flutter_linux/flutter_linux.h>
+#include <string.h>
 #ifdef GDK_WINDOWING_X11
 #include <gdk/gdkx.h>
+#endif
+#if defined(GDK_WINDOWING_X11) && defined(UWUHERE_X11)
+#include <X11/Xatom.h>
 #endif
 
 #include "flutter/generated_plugin_registrant.h"
@@ -11,9 +15,76 @@
 struct _MyApplication {
   GtkApplication parent_instance;
   char** dart_entrypoint_arguments;
+  GtkWindow* window;
+  FlView* view;
+  FlMethodChannel* channel;
 };
 
 G_DEFINE_TYPE(MyApplication, my_application, GTK_TYPE_APPLICATION)
+
+// The compositor's blur behind the window, for the Frosted Glass look (lib/desktop/backdrop.dart).
+// KWin's (and Deepin's deepin-kwin's) on X11: _KDE_NET_WM_BLUR_BEHIND_REGION on the window, with
+// no region meaning all of it. The compositor puts that name on the root window while its blur is
+// on, which is how to know it will blur. Wayland compositors (COSMIC's among them) have no way to
+// ask yet, so it's false there and the app draws its own glows instead.
+static gboolean set_blur(MyApplication* self, gboolean on) {
+#if defined(GDK_WINDOWING_X11) && defined(UWUHERE_X11)
+  GdkWindow* gdk_window = gtk_widget_get_window(GTK_WIDGET(self->window));
+  if (gdk_window == nullptr || !GDK_IS_X11_WINDOW(gdk_window)) return FALSE;
+  GdkScreen* screen = gtk_widget_get_screen(GTK_WIDGET(self->window));
+  if (!gdk_screen_is_composited(screen) ||
+      gdk_window_get_visual(gdk_window) != gdk_screen_get_rgba_visual(screen)) {
+    return FALSE;
+  }
+  Display* display = GDK_DISPLAY_XDISPLAY(gdk_window_get_display(gdk_window));
+  Window xid = GDK_WINDOW_XID(gdk_window);
+  Atom blur = XInternAtom(display, "_KDE_NET_WM_BLUR_BEHIND_REGION", False);
+
+  gboolean offered = FALSE;
+  int count = 0;
+  Atom* names = XListProperties(display, DefaultRootWindow(display), &count);
+  for (int i = 0; names != nullptr && i < count; i++) {
+    if (names[i] == blur) offered = TRUE;
+  }
+  if (names != nullptr) XFree(names);
+
+  GdkRGBA background;
+  if (on && offered) {
+    XChangeProperty(display, xid, blur, XA_CARDINAL, 32, PropModeReplace, nullptr, 0);
+    gdk_rgba_parse(&background, "#00000000");
+  } else {
+    XDeleteProperty(display, xid, blur);
+    gdk_rgba_parse(&background, "#000000");
+  }
+  fl_view_set_background_color(self->view, &background);
+  XFlush(display);
+  return on && offered;
+#else
+  return FALSE;
+#endif
+}
+
+// The app's own channel (org.uwuapps.here/desktop, lib/desktop/runner.dart). On Linux it answers
+// setBackdrop only; single instance and links are done in Dart (lib/desktop/desk.dart).
+static void method_call_cb(FlMethodChannel* channel, FlMethodCall* call,
+                           gpointer user_data) {
+  MyApplication* self = MY_APPLICATION(user_data);
+  g_autoptr(FlMethodResponse) response = nullptr;
+  if (strcmp(fl_method_call_get_name(call), "setBackdrop") == 0) {
+    FlValue* args = fl_method_call_get_args(call);
+    gboolean blur = FALSE;
+    if (args != nullptr && fl_value_get_type(args) == FL_VALUE_TYPE_MAP) {
+      FlValue* kind = fl_value_lookup_string(args, "kind");
+      blur = kind != nullptr && fl_value_get_type(kind) == FL_VALUE_TYPE_STRING &&
+             strcmp(fl_value_get_string(kind), "blur") == 0;
+    }
+    response = FL_METHOD_RESPONSE(
+        fl_method_success_response_new(fl_value_new_bool(set_blur(self, blur))));
+  } else {
+    response = FL_METHOD_RESPONSE(fl_method_not_implemented_response_new());
+  }
+  fl_method_call_respond(call, response, nullptr);
+}
 
 // Called when first Flutter frame received.
 static void first_frame_cb(MyApplication* self, FlView* view) {
@@ -30,6 +101,15 @@ static void my_application_activate(GApplication* application) {
   gtk_window_set_title(window, "uwuHere");
 
   gtk_window_set_default_size(window, 1120, 760);
+
+  // A see-through window where the compositor can show one, for the Frosted Glass look's blur
+  // (set_blur). The app paints every pixel in the other looks, so nothing shows through there.
+  GdkScreen* screen = gtk_window_get_screen(window);
+  GdkVisual* rgba = gdk_screen_get_rgba_visual(screen);
+  if (rgba != nullptr && gdk_screen_is_composited(screen)) {
+    gtk_widget_set_visual(GTK_WIDGET(window), rgba);
+    gtk_widget_set_app_paintable(GTK_WIDGET(window), TRUE);
+  }
 
   g_autoptr(FlDartProject) project = fl_dart_project_new();
   fl_dart_project_set_dart_entrypoint_arguments(
@@ -49,6 +129,15 @@ static void my_application_activate(GApplication* application) {
   g_signal_connect_swapped(view, "first-frame", G_CALLBACK(first_frame_cb),
                            self);
   gtk_widget_realize(GTK_WIDGET(view));
+
+  self->window = window;
+  self->view = view;
+  g_autoptr(FlStandardMethodCodec) codec = fl_standard_method_codec_new();
+  self->channel = fl_method_channel_new(
+      fl_engine_get_binary_messenger(fl_view_get_engine(view)),
+      "org.uwuapps.here/desktop", FL_METHOD_CODEC(codec));
+  fl_method_channel_set_method_call_handler(self->channel, method_call_cb, self,
+                                            nullptr);
 
   fl_register_plugins(FL_PLUGIN_REGISTRY(view));
   // Each desktop widget is a window with an engine of its own: it gets the same plugins.
@@ -102,6 +191,7 @@ static void my_application_shutdown(GApplication* application) {
 static void my_application_dispose(GObject* object) {
   MyApplication* self = MY_APPLICATION(object);
   g_clear_pointer(&self->dart_entrypoint_arguments, g_strfreev);
+  g_clear_object(&self->channel);
   G_OBJECT_CLASS(my_application_parent_class)->dispose(object);
 }
 
