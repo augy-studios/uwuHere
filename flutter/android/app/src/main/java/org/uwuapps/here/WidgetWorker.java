@@ -13,8 +13,8 @@ import androidx.work.Worker;
 import androidx.work.WorkerParameters;
 
 public class WidgetWorker extends Worker {
-    public WidgetWorker(@NonNull Context context, @NonNull WorkerParameters params) {
-        super(context, params);
+    public WidgetWorker(@NonNull Context context, @NonNull WorkerParameters workerParameters) {
+        super(context, workerParameters);
     }
 
     @NonNull

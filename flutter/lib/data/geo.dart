@@ -11,15 +11,22 @@ class GeoError implements Exception {
   GeoError(this.message);
   final String message;
   @override
-  String toString() => message;
+  String toString() {
+    return message;
+  }
 }
 
+/// One location reading: where, and how sure (accuracy in metres).
 class Position2 {
-  const Position2(this.lat, this.lng, this.accuracy);
-  final double lat;
-  final double lng;
+  const Position2(this.latitude, this.longitude, this.accuracy);
+  final double latitude;
+  final double longitude;
   final double accuracy;
-  Map<String, dynamic> toJson() => {'lat': lat, 'lng': lng, 'accuracy': accuracy};
+
+  /// The site's shape, { lat, lng, accuracy }: these keys are what the server reads.
+  Map<String, dynamic> toJson() {
+    return {'lat': latitude, 'lng': longitude, 'accuracy': accuracy};
+  }
 }
 
 class Geo {
@@ -28,6 +35,7 @@ class Geo {
   /// Set by the desktop layer on Linux: a reading when the system's own can't give one.
   static Future<Position2?> Function()? fallback;
 
+  /// What to say when location is blocked, in the words of this platform's settings.
   static String get _blocked {
     if (kIsWeb) return "Location access is blocked. Allow it for this site in your browser's settings, then try again.";
     if (Env.android) return "Location is off for uwuHere. Allow it in Android's settings (Apps, uwuHere, Permissions), then try again.";
@@ -36,38 +44,58 @@ class Geo {
     return 'Location is off on this computer. Turn on its location service, then try again.';
   }
 
+  /// One reading, asking for permission first if it hasn't been given. Throws a [GeoError] with a
+  /// sentence for the person when there's no reading to be had; the desktop's [fallback] is tried
+  /// before giving up.
   static Future<Position2> getPosition({Duration timeout = const Duration(seconds: 15)}) async {
     try {
       if (!kIsWeb && !await Geolocator.isLocationServiceEnabled()) {
-        final f = await _fallback();
-        if (f != null) return f;
-        throw GeoError(Env.android ? "Location is switched off on this phone. Turn it on, then try again." : _blocked);
+        final fallbackReading = await _fallback();
+        if (fallbackReading != null) {
+          return fallbackReading;
+        }
+        if (Env.android) {
+          throw GeoError("Location is switched off on this phone. Turn it on, then try again.");
+        } else {
+          throw GeoError(_blocked);
+        }
       }
-      var p = await Geolocator.checkPermission();
-      if (p == LocationPermission.denied) p = await Geolocator.requestPermission();
-      if (p == LocationPermission.denied || p == LocationPermission.deniedForever) throw GeoError(_blocked);
-      final pos = await Geolocator.getCurrentPosition(
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+      if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
+        throw GeoError(_blocked);
+      }
+      final position = await Geolocator.getCurrentPosition(
         locationSettings: LocationSettings(accuracy: LocationAccuracy.best, timeLimit: timeout),
       );
-      return Position2(pos.latitude, pos.longitude, pos.accuracy);
+      return Position2(position.latitude, position.longitude, position.accuracy);
     } on GeoError {
       rethrow;
     } on PermissionDeniedException {
       throw GeoError(_blocked);
-    } catch (e) {
-      final f = await _fallback();
-      if (f != null) return f;
-      final text = '$e'.toLowerCase();
-      if (text.contains('timeout') || text.contains('time limit')) throw GeoError('Finding your location took too long. Try again.');
+    } catch (error) {
+      final fallbackReading = await _fallback();
+      if (fallbackReading != null) {
+        return fallbackReading;
+      }
+      final text = '$error'.toLowerCase();
+      if (text.contains('timeout') || text.contains('time limit')) {
+        throw GeoError('Finding your location took too long. Try again.');
+      }
       throw GeoError('Your location could not be found. Try again.');
     }
   }
 
+  /// The desktop's own reading, or null when there's none (a [GeoError] from it is passed on).
   static Future<Position2?> _fallback() async {
-    final f = fallback;
-    if (f == null) return null;
+    final fallbackGetter = fallback;
+    if (fallbackGetter == null) {
+      return null;
+    }
     try {
-      return await f();
+      return await fallbackGetter();
     } on GeoError {
       rethrow;
     } catch (_) {

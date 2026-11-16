@@ -31,8 +31,10 @@ import 'package:uwuhere/native/bridge.dart';
 import 'package:uwuhere/run.dart';
 import 'package:uwuhere/theme/theme.dart';
 
+/// The stand-in for the Android side: answers each plugin call the way the phone would, records
+/// every call in window.e2eCalls, and lets the tests push events in through window.e2eEmit.
 class _FakeAndroid implements NativeHost {
-  _FakeAndroid({required this.play, required this.nfc}) {
+  _FakeAndroid({required this.playBuild, required this.hasNfc}) {
     globalContext.setProperty('e2eCalls'.toJS, <JSAny>[].toJS);
     globalContext.setProperty(
       'e2eEmit'.toJS,
@@ -42,10 +44,14 @@ class _FakeAndroid implements NativeHost {
     );
   }
 
-  final bool play;
-  final bool nfc;
+  /// Whether this pretends to be the Google Play build (no updater of its own).
+  final bool playBuild;
+
+  /// Whether this pretends the phone has NFC.
+  final bool hasNfc;
   final Map<String, bool> _topics = {'checkins': false, 'releases': false, 'news': false};
 
+  /// Records the call, then answers it as the Android app would for this plugin and method.
   @override
   Future<Map<String, dynamic>?> call(String plugin, String method, Map<String, dynamic> options) async {
     (globalContext.getProperty('e2eCalls'.toJS) as JSObject)
@@ -56,24 +62,42 @@ class _FakeAndroid implements NativeHost {
           'platform': 'android',
           'version': '2.0.0',
           'build': 5,
-          'play': play,
+          'play': playBuild,
           'release': '16',
           'model': 'Google Pixel 9',
           'sdk': 36,
           'features': [
             'links', 'push', 'brightness', 'savefile', 'settings', 'tap', 'hotspot', 'mesh', 'widget',
-            if (!play) 'update',
-            if (!play) 'checkupdate',
+            if (!playBuild) 'update',
+            if (!playBuild) 'checkupdate',
           ],
         };
       case 'App.launchLink':
         return {};
       case 'Here.tap':
-        return {'state': options['on'] == true ? (nfc ? 'ready' : 'unsupported') : 'idle'};
+        final String tapState;
+        if (options['on'] == true) {
+          if (hasNfc) {
+            tapState = 'ready';
+          } else {
+            tapState = 'unsupported';
+          }
+        } else {
+          tapState = 'idle';
+        }
+        return {'state': tapState};
       case 'Here.bluetooth':
-        return {'state': options['on'] == true ? 'ready' : 'idle'};
+        final String bluetoothState;
+        if (options['on'] == true) {
+          bluetoothState = 'ready';
+        } else {
+          bluetoothState = 'idle';
+        }
+        return {'state': bluetoothState};
       case 'Here.hotspot':
-        if (options['on'] != true) return {'state': 'off'};
+        if (options['on'] != true) {
+          return {'state': 'off'};
+        }
         return {'state': 'on', 'ssid': 'uwuHere-K7Q2', 'password': 'blue-otter-41', 'security': 'WPA', 'url': 'http://192.168.43.1:8080/'};
       case 'Here.meshCheckIn':
         return {'ok': true, 'at': DateTime.now().toUtc().toIso8601String()};
@@ -93,32 +117,44 @@ class _FakeAndroid implements NativeHost {
   }
 }
 
+/// Reads the query parameters (listed at the top of this file), sets the app up to match them,
+/// then starts it the same way the real app starts.
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   SemanticsBinding.instance.ensureSemantics();
-  final q = Uri.base.queryParameters;
-  if (q['notour'] == '1') Tour.off = true;
-  if (q['android'] == '1') {
-    Env.androidOverride = true;
-    Native.host = _FakeAndroid(play: q['play'] == '1', nfc: q['nonfc'] != '1');
+  final queryParameters = Uri.base.queryParameters;
+  if (queryParameters['notour'] == '1') {
+    Tour.off = true;
   }
-  if (q['wallpaper'] == '1') {
+  if (queryParameters['android'] == '1') {
+    Env.androidOverride = true;
+    Native.host = _FakeAndroid(playBuild: queryParameters['play'] == '1', hasNfc: queryParameters['nonfc'] != '1');
+  }
+  if (queryParameters['wallpaper'] == '1') {
     testLightDynamic = ColorScheme.fromSeed(seedColor: const Color(0xFF7B3FF2));
     testDarkDynamic = ColorScheme.fromSeed(seedColor: const Color(0xFF7B3FF2), brightness: Brightness.dark);
   }
-  if (q['welcome'] == '1') {
+  if (queryParameters['welcome'] == '1') {
     Env.desktopOverride = true;
     await Store.open();
     ThemeController.I.init();
     runApp(WelcomeApp(done: (_) {}));
     return;
   }
-  final native = NativeStyle.values.where((v) => v.name == q['native']).firstOrNull;
-  if (native != null) ThemeController.styleOverride = native;
-  if (q['desktop'] == '1') {
+  final nativeStyle = NativeStyle.values.where((style) {
+    return style.name == queryParameters['native'];
+  }).firstOrNull;
+  if (nativeStyle != null) {
+    ThemeController.styleOverride = nativeStyle;
+  }
+  if (queryParameters['desktop'] == '1') {
     Env.desktopOverride = true;
-    desktopChrome = (context, child) => DesktopChrome(child: child);
+    desktopChrome = (context, child) {
+      return DesktopChrome(child: child);
+    };
   }
   await runUwuHere(const []);
-  if (q['desktop'] == '1') ViewHistory.start();
+  if (queryParameters['desktop'] == '1') {
+    ViewHistory.start();
+  }
 }
