@@ -33,9 +33,11 @@ class HostedEvent {
   final bool ended;
 }
 
+/// The "uwuhere." keys above, read and written as the site's JSON.
 class HereStore {
   HereStore._();
 
+  /// The decoded JSON under one key, or [fallback] when it's missing or isn't JSON.
   static Object? read(String key, [Object? fallback]) {
     final raw = Store.I.get('$_prefix$key');
     if (raw == null) return fallback;
@@ -46,31 +48,73 @@ class HereStore {
     }
   }
 
+  /// Saves a value as JSON under one key; null removes the key.
   static void write(String key, Object? value) {
-    Store.I.put('$_prefix$key', value == null ? null : jsonEncode(value));
+    if (value == null) {
+      Store.I.put('$_prefix$key', null);
+    } else {
+      Store.I.put('$_prefix$key', jsonEncode(value));
+    }
   }
 
-  static Stream<String?> changes(String key) => Store.I.changes('$_prefix$key');
+  static Stream<String?> changes(String key) {
+    return Store.I.changes('$_prefix$key');
+  }
 
-  static Map<String, dynamic> _map(Object? v) => v is Map ? Map<String, dynamic>.from(v) : <String, dynamic>{};
+  /// A decoded value as a map, or an empty map when it isn't one.
+  static Map<String, dynamic> _asMap(Object? value) {
+    if (value is Map) {
+      return Map<String, dynamic>.from(value);
+    }
+    return <String, dynamic>{};
+  }
+
+  /// A decoded value as a map, or null when it isn't one.
+  static Map<String, dynamic>? _asMapOrNull(Object? value) {
+    if (value is Map) {
+      return Map<String, dynamic>.from(value);
+    }
+    return null;
+  }
+
+  /// A stored value as text, or empty text when it's missing.
+  static String _textOf(Object? value) {
+    if (value == null) {
+      return '';
+    }
+    return '$value';
+  }
 
   // ---- device ----
 
   static String? _memoryDeviceId;
 
+  /// A random version 4 UUID, "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx", as crypto.randomUUID makes.
   static String _uuid() {
-    final r = math.Random.secure();
-    final b = List<int>.generate(16, (_) => r.nextInt(256));
-    b[6] = (b[6] & 0x0f) | 0x40;
-    b[8] = (b[8] & 0x3f) | 0x80;
-    final h = b.map((x) => x.toRadixString(16).padLeft(2, '0')).join();
-    return '${h.substring(0, 8)}-${h.substring(8, 12)}-${h.substring(12, 16)}-${h.substring(16, 20)}-${h.substring(20)}';
+    final random = math.Random.secure();
+    final bytes = List<int>.generate(16, (_) {
+      return random.nextInt(256);
+    });
+    // The version (4) and variant bits the UUID format fixes.
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    final hex = bytes.map((byte) {
+      return byte.toRadixString(16).padLeft(2, '0');
+    }).join();
+    return '${hex.substring(0, 8)}-${hex.substring(8, 12)}-${hex.substring(12, 16)}-${hex.substring(16, 20)}-${hex.substring(20)}';
   }
 
+  /// This device's check-in id: the stored one, or a new one made and saved. Should saving fail,
+  /// the same new id is kept in memory for the rest of this run.
   static String deviceId() {
     var id = read('deviceId');
     if (id is! String || !RegExp(r'^[A-Za-z0-9-]{16,64}$').hasMatch(id)) {
-      id = _memoryDeviceId ?? _uuid();
+      final rememberedId = _memoryDeviceId;
+      if (rememberedId == null) {
+        id = _uuid();
+      } else {
+        id = rememberedId;
+      }
       _memoryDeviceId = id;
       write('deviceId', id);
     }
@@ -78,53 +122,97 @@ class HereStore {
   }
 
   /// SHA-256 of the device id, hex. What the host is given, never the id.
-  static String deviceHash() => sha256.convert(utf8.encode(deviceId())).toString();
-
-  static ({String name, String note}) profile() {
-    final p = _map(read('profile'));
-    return (name: '${p['name'] ?? ''}', note: '${p['note'] ?? ''}');
+  static String deviceHash() {
+    return sha256.convert(utf8.encode(deviceId())).toString();
   }
 
-  static void saveProfile(String name, String note) => write('profile', {'name': name, 'note': note});
+  static ({String name, String note}) profile() {
+    final savedProfile = _asMap(read('profile'));
+    return (name: _textOf(savedProfile['name']), note: _textOf(savedProfile['note']));
+  }
+
+  static void saveProfile(String name, String note) {
+    write('profile', {'name': name, 'note': note});
+  }
 
   // ---- hosting ----
 
+  /// Every event this device manages, newest first.
   static List<HostedEvent> listHosted() {
-    final all = _map(read('hosted', {}));
-    final list = [
-      for (final e in all.entries)
-        if (e.value is Map)
+    final all = _asMap(read('hosted', {}));
+    final list = <HostedEvent>[];
+    for (final entry in all.entries) {
+      final saved = entry.value;
+      if (saved is Map) {
+        list.add(
           HostedEvent(
-            code: e.key,
-            hostKey: '${(e.value as Map)['hostKey'] ?? ''}',
-            title: '${(e.value as Map)['title'] ?? ''}',
-            createdAt: '${(e.value as Map)['createdAt'] ?? ''}',
-            ended: (e.value as Map)['ended'] == true,
+            code: entry.key,
+            hostKey: _textOf(saved['hostKey']),
+            title: _textOf(saved['title']),
+            createdAt: _textOf(saved['createdAt']),
+            ended: saved['ended'] == true,
           ),
-    ];
-    list.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+        );
+      }
+    }
+    list.sort((first, second) {
+      return second.createdAt.compareTo(first.createdAt);
+    });
     return list;
   }
 
   static String? hostKey(String code) {
-    final e = _map(read('hosted', {}))[code];
-    return e is Map && e['hostKey'] is String ? e['hostKey'] as String : null;
+    final saved = _asMap(read('hosted', {}))[code];
+    if (saved is Map && saved['hostKey'] is String) {
+      return saved['hostKey'] as String;
+    }
+    return null;
   }
 
+  /// Remembers an event this device manages. The title and creation time come from [event] when
+  /// it has them, else from what was saved before.
   static void saveHosted(String code, String hostKey, Map<String, dynamic>? event) {
-    final all = _map(read('hosted', {}));
-    final before = _map(all[code]);
+    final all = _asMap(read('hosted', {}));
+    final before = _asMap(all[code]);
+
+    Object? title;
+    if (event != null) {
+      title = event['title'];
+    }
+    if (title == null) {
+      title = before['title'];
+    }
+    if (title == null) {
+      title = '';
+    }
+
+    Object? createdAt;
+    if (event != null) {
+      createdAt = event['createdAt'];
+    }
+    if (createdAt == null) {
+      createdAt = before['createdAt'];
+    }
+    if (createdAt == null) {
+      createdAt = DateTime.now().toUtc().toIso8601String();
+    }
+
+    var ended = false;
+    if (event != null) {
+      ended = event['ended'] == true;
+    }
+
     all[code] = {
       'hostKey': hostKey,
-      'title': event?['title'] ?? before['title'] ?? '',
-      'createdAt': event?['createdAt'] ?? before['createdAt'] ?? DateTime.now().toUtc().toIso8601String(),
-      'ended': event?['ended'] == true,
+      'title': title,
+      'createdAt': createdAt,
+      'ended': ended,
     };
     write('hosted', all);
   }
 
   static void forgetHosted(String code) {
-    final all = _map(read('hosted', {}));
+    final all = _asMap(read('hosted', {}));
     all.remove(code);
     write('hosted', all);
     write('host.$code', null);
@@ -132,45 +220,59 @@ class HereStore {
   }
 
   static Map<String, dynamic>? hostCache(String code) {
-    final v = read('host.$code');
-    return v is Map ? Map<String, dynamic>.from(v) : null;
+    return _asMapOrNull(read('host.$code'));
   }
 
-  static void saveHostCache(String code, Map<String, dynamic> event, List<dynamic> attendees) =>
-      write('host.$code', {'event': event, 'attendees': attendees, 'savedAt': DateTime.now().toUtc().toIso8601String()});
+  static void saveHostCache(String code, Map<String, dynamic> event, List<dynamic> attendees) {
+    write('host.$code', {'event': event, 'attendees': attendees, 'savedAt': DateTime.now().toUtc().toIso8601String()});
+  }
 
   static List<Map<String, dynamic>> outbox(String code) {
-    final v = read('outbox.$code', []);
-    return [
-      if (v is List)
-        for (final i in v)
-          if (i is Map) Map<String, dynamic>.from(i),
-    ];
+    final stored = read('outbox.$code', []);
+    final items = <Map<String, dynamic>>[];
+    if (stored is List) {
+      for (final item in stored) {
+        if (item is Map) {
+          items.add(Map<String, dynamic>.from(item));
+        }
+      }
+    }
+    return items;
   }
 
-  static void saveOutbox(String code, List<Map<String, dynamic>> items) => write('outbox.$code', items.isEmpty ? null : items);
+  /// Saves the waiting changes; an empty list removes the key.
+  static void saveOutbox(String code, List<Map<String, dynamic>> items) {
+    if (items.isEmpty) {
+      write('outbox.$code', null);
+    } else {
+      write('outbox.$code', items);
+    }
+  }
 
   // ---- attending ----
 
   static Map<String, dynamic>? eventCache(String code) {
-    final v = read('event.$code');
-    return v is Map ? Map<String, dynamic>.from(v) : null;
+    return _asMapOrNull(read('event.$code'));
   }
 
-  static void saveEventCache(String code, Map<String, dynamic>? event) => write('event.$code', event);
+  static void saveEventCache(String code, Map<String, dynamic>? event) {
+    write('event.$code', event);
+  }
 
   static Map<String, dynamic>? attendance(String code) {
-    final v = read('attend.$code');
-    return v is Map ? Map<String, dynamic>.from(v) : null;
+    return _asMapOrNull(read('attend.$code'));
   }
 
-  static void saveAttendance(String code, Map<String, dynamic>? attendance) => write('attend.$code', attendance);
+  static void saveAttendance(String code, Map<String, dynamic>? attendance) {
+    write('attend.$code', attendance);
+  }
 
   /// { token, name, note, tappedAt }, or null.
   static Map<String, dynamic>? heldTap(String code) {
-    final v = read('heldtap.$code');
-    return v is Map ? Map<String, dynamic>.from(v) : null;
+    return _asMapOrNull(read('heldtap.$code'));
   }
 
-  static void saveHeldTap(String code, Map<String, dynamic>? held) => write('heldtap.$code', held);
+  static void saveHeldTap(String code, Map<String, dynamic>? held) {
+    write('heldtap.$code', held);
+  }
 }

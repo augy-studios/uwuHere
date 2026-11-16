@@ -89,7 +89,9 @@ const _paths = <String, String>{
 const _strokes = <String, double>{'chevronRight': 2};
 
 /// Whether there's an icon of that name.
-bool hasIcon(String name) => _paths.containsKey(name);
+bool hasIcon(String name) {
+  return _paths.containsKey(name);
+}
 
 /// The SVG of one icon, in a colour: for places that need the picture itself (the tray icon). An
 /// unknown name draws nothing, so in a debug build it says so instead (test/logic_test.dart also
@@ -99,10 +101,31 @@ String iconSvg(String name, {String colour = '#000000', double? stroke}) {
   return _svg(name, colour, stroke);
 }
 
-String _svg(String name, String colour, double? stroke) =>
-    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="$colour" stroke-width="${stroke ?? _strokes[name] ?? 1.8}" '
-    'stroke-linecap="round" stroke-linejoin="round">${(_paths[name] ?? '').replaceAll('currentColor', colour)}</svg>';
+/// Builds the SVG text for one icon. The stroke width is the one asked for, else the icon's own
+/// from [_strokes], else the site's usual 1.8. An unknown name gives an empty picture.
+String _svg(String name, String colour, double? stroke) {
+  double strokeWidth;
+  if (stroke != null) {
+    strokeWidth = stroke;
+  } else {
+    final iconStrokeWidth = _strokes[name];
+    if (iconStrokeWidth != null) {
+      strokeWidth = iconStrokeWidth;
+    } else {
+      strokeWidth = 1.8;
+    }
+  }
+  String paths = '';
+  final iconPaths = _paths[name];
+  if (iconPaths != null) {
+    paths = iconPaths;
+  }
+  return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="$colour" stroke-width="$strokeWidth" '
+      'stroke-linecap="round" stroke-linejoin="round">${paths.replaceAll('currentColor', colour)}</svg>';
+}
 
+/// One of the site's icons as a widget, drawn in [color] or else the colour of the icons or words
+/// around it.
 class AppIcon extends StatelessWidget {
   const AppIcon(
     this.name, {
@@ -119,17 +142,31 @@ class AppIcon extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final c =
-        color ??
-        IconTheme.of(context).color ??
-        DefaultTextStyle.of(context).style.color ??
-        Colors.black;
-    final hex =
-        '#${(c.toARGB32() & 0xffffff).toRadixString(16).padLeft(6, '0')}';
+    // The colour asked for, else the icon theme's, else the words', else black.
+    Color drawColor;
+    final askedColor = color;
+    if (askedColor != null) {
+      drawColor = askedColor;
+    } else {
+      final iconThemeColor = IconTheme.of(context).color;
+      if (iconThemeColor != null) {
+        drawColor = iconThemeColor;
+      } else {
+        final textColor = DefaultTextStyle.of(context).style.color;
+        if (textColor != null) {
+          drawColor = textColor;
+        } else {
+          drawColor = Colors.black;
+        }
+      }
+    }
+    // The SVG takes the colour without its opacity, as #rrggbb; the opacity is applied around it.
+    final hexColour =
+        '#${(drawColor.toARGB32() & 0xffffff).toRadixString(16).padLeft(6, '0')}';
     return Opacity(
-      opacity: c.a,
+      opacity: drawColor.a,
       child: SvgPicture.string(
-        iconSvg(name, colour: hex, stroke: stroke),
+        iconSvg(name, colour: hexColour, stroke: stroke),
         width: size,
         height: size,
         excludeFromSemantics: true,

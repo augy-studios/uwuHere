@@ -6,9 +6,16 @@ import 'package:web/web.dart' as web;
 void browserFullscreen(bool on) {
   try {
     if (on) {
-      web.document.documentElement?.requestFullscreen().toDart.catchError((Object _) => null);
+      final documentElement = web.document.documentElement;
+      if (documentElement != null) {
+        documentElement.requestFullscreen().toDart.catchError((Object error) {
+          return null;
+        });
+      }
     } else if (web.document.fullscreenElement != null) {
-      web.document.exitFullscreen().toDart.catchError((Object _) => null);
+      web.document.exitFullscreen().toDart.catchError((Object error) {
+        return null;
+      });
     }
   } catch (_) {
     // Refused, or not here: nothing else changes.

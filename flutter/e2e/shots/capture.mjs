@@ -10,9 +10,11 @@ import { chromium } from "@playwright/test";
 import { mkdirSync, readFileSync } from "node:fs";
 import { hosted, makeEvent, mockApi, passThroughEmptyLayers } from "../tests/helpers.js";
 
-const BASE = "http://127.0.0.1:47481";
-const OUT = new URL("./raw/", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
-mkdirSync(OUT, { recursive: true });
+const BASE_URL = "http://127.0.0.1:47481";
+// The raw/ folder beside this file, as a path (with Windows' leading slash before a drive letter
+// taken off).
+const OUTPUT_FOLDER = new URL("./raw/", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
+mkdirSync(OUTPUT_FOLDER, { recursive: true });
 
 // ---- the events ----
 
@@ -27,10 +29,16 @@ const people = [
   ["Lou Chen", "A0213", "hotspot", null],
 ];
 
+/**
+ * The seeded events: a science lab with everyone in `people` checked in (one of them left early),
+ * a book club and an ended Saturday run, all at fixed times so each picture comes out the same.
+ */
 function events() {
-  const db = { events: {} };
-  const minutes = (m) => new Date(Date.UTC(2026, 10, 16, 1, 30 + m)).toISOString();
-  const lab = makeEvent(db, {
+  const database = { events: {} };
+  const minutesFromStart = (minutes) => {
+    return new Date(Date.UTC(2026, 10, 16, 1, 30 + minutes)).toISOString();
+  };
+  const lab = makeEvent(database, {
     code: "K7QX2B",
     title: "Year 9 Science, Lab 2",
     buttonLabel: "I'm here!",
@@ -39,36 +47,49 @@ function events() {
     allowP2p: true,
     allowLocation: true,
     allowTap: true,
-    createdAt: minutes(-5),
+    createdAt: minutesFromStart(-5),
   });
-  people.forEach(([name, note, method, distance], i) => {
-    lab.attendees.push({ id: `a${i}`, name, note, method, distance, checkedInAt: minutes(i * 2), leftEarlyAt: i === 5 ? minutes(40) : null });
+  people.forEach(([name, note, method, distance], personIndex) => {
+    let leftEarlyAt = null;
+    if (personIndex === 5) {
+      leftEarlyAt = minutesFromStart(40);
+    }
+    lab.attendees.push({ id: `a${personIndex}`, name, note, method, distance, checkedInAt: minutesFromStart(personIndex * 2), leftEarlyAt });
   });
-  const club = makeEvent(db, { code: "BCD234", title: "Book club", buttonLabel: "Here", buttonColor: "#ffcc99", createdAt: minutes(-2000) });
-  const run = makeEvent(db, { code: "MNP567", title: "Saturday run", ended: true, endedAt: minutes(-3000), createdAt: minutes(-3200) });
-  return { db, lab, club, run };
+  const club = makeEvent(database, { code: "BCD234", title: "Book club", buttonLabel: "Here", buttonColor: "#ffcc99", createdAt: minutesFromStart(-2000) });
+  const run = makeEvent(database, { code: "MNP567", title: "Saturday run", ended: true, endedAt: minutesFromStart(-3000), createdAt: minutesFromStart(-3200) });
+  return { database, lab, club, run };
 }
 
-const notes = (v) => readFileSync(new URL(`../../../announcements/release-notes-${v}.md`, import.meta.url), "utf8");
-const page = (v) => `https://github.com/augy-studios/uwuHere/releases/tag/android-v${v}`;
+const notes = (version) => {
+  return readFileSync(new URL(`../../../announcements/release-notes-${version}.md`, import.meta.url), "utf8");
+};
+const releasePage = (version) => {
+  return `https://github.com/augy-studios/uwuHere/releases/tag/android-v${version}`;
+};
 const release = {
   version: "2.0.0",
   size: 41000000,
   sha256: null,
   apk: "https://github.com/augy-studios/uwuHere/releases/download/android-v2.0.0/uwuhere-2.0.0.apk",
-  page: page("2.0.0"),
+  page: releasePage("2.0.0"),
   date: "2026-11-16T10:00:00Z",
   history: [
-    { version: "2.0.0", date: "2026-11-16T10:00:00Z", notes: notes("2.0.0"), page: page("2.0.0") },
-    { version: "1.0.3", date: "2026-10-19T16:21:23Z", notes: notes("1.0.3"), page: page("1.0.3") },
-    { version: "1.0.2", date: "2026-10-17T17:57:51Z", notes: notes("1.0.2"), page: page("1.0.2") },
-    { version: "1.0.1", date: "2026-10-17T09:11:51Z", notes: notes("1.0.1"), page: page("1.0.1") },
-    { version: "1.0.0", date: "2026-10-16T21:28:32Z", notes: notes("1.0.0"), page: page("1.0.0") },
+    { version: "2.0.0", date: "2026-11-16T10:00:00Z", notes: notes("2.0.0"), page: releasePage("2.0.0") },
+    { version: "1.0.3", date: "2026-10-19T16:21:23Z", notes: notes("1.0.3"), page: releasePage("1.0.3") },
+    { version: "1.0.2", date: "2026-10-17T17:57:51Z", notes: notes("1.0.2"), page: releasePage("1.0.2") },
+    { version: "1.0.1", date: "2026-10-17T09:11:51Z", notes: notes("1.0.1"), page: releasePage("1.0.1") },
+    { version: "1.0.0", date: "2026-10-16T21:28:32Z", notes: notes("1.0.0"), page: releasePage("1.0.0") },
   ],
 };
 
 // ---- driving the app ----
 
+/**
+ * Opens the app in a fresh browser context of the given size, with the API answered from the
+ * seeded events, the store filled (`seed`, plus this device hosting the three events), and waits
+ * till `ready` (by default the home page's heading) shows.
+ */
 async function open(browser, { viewport, scale, query = "", seed = {}, tours = false, ready }) {
   const context = await browser.newContext({
     viewport,
@@ -79,167 +100,210 @@ async function open(browser, { viewport, scale, query = "", seed = {}, tours = f
     permissions: ["geolocation"],
   });
   const tab = await context.newPage();
-  const { db, lab, club, run } = events();
-  db.release = release;
-  await mockApi(tab, db);
+  const { database, lab, club, run } = events();
+  database.release = release;
+  await mockApi(tab, database);
   await tab.addInitScript(
-    ([extra, mine, tours]) => {
-      if (sessionStorage.getItem("seeded")) return;
+    ([extraValues, myEvents, showTours]) => {
+      if (sessionStorage.getItem("seeded")) {
+        return;
+      }
       sessionStorage.setItem("seeded", "1");
       // As store.dart keeps them in a browser (tests/helpers.js).
-      const put = (k, v) => localStorage.setItem(`flutter.ls.${k}`, JSON.stringify(typeof v === "string" ? v : JSON.stringify(v)));
-      put("uwuhere.hosted", mine);
+      const put = (key, value) => {
+        let encoded;
+        if (typeof value === "string") {
+          encoded = value;
+        } else {
+          encoded = JSON.stringify(value);
+        }
+        localStorage.setItem(`flutter.ls.${key}`, JSON.stringify(encoded));
+      };
+      put("uwuhere.hosted", myEvents);
       put("uwuhere.trayOpen", "1");
       put("uwuhere.profile", { name: "Priya Nair", note: "A0198" });
-      if (!tours) {
+      if (!showTours) {
         put("uwuhere.tour.welcome", "done");
         put("uwuhere.tour.pages", ["host", "join"]);
       }
-      for (const [k, v] of Object.entries(extra)) put(k, v);
+      for (const [key, value] of Object.entries(extraValues)) {
+        put(key, value);
+      }
     },
     [seed, hosted(lab, club, run), tours],
   );
   await passThroughEmptyLayers(tab);
-  await tab.goto(`${BASE}/${query}`);
-  await (ready ? ready(tab) : tab.getByRole("heading", { name: "Host an event" }).first()).waitFor({ timeout: 30000 });
+  await tab.goto(`${BASE_URL}/${query}`);
+  let readyLocator;
+  if (ready) {
+    readyLocator = ready(tab);
+  } else {
+    readyLocator = tab.getByRole("heading", { name: "Host an event" }).first();
+  }
+  await readyLocator.waitFor({ timeout: 30000 });
   await tab.waitForTimeout(800);
-  return { context, page: tab, db, lab };
+  return { context, page: tab, database, lab };
 }
 
-const btn = (p, name, exact = true) => p.getByRole("button", { name, exact });
-const hostPage = (q) => `${q}&page=host&id=K7QX2B`;
-const hostReady = (p) => p.getByRole("heading", { name: "Year 9 Science, Lab 2" }).first();
-const joinReady = (p) => p.getByRole("heading", { name: "Year 9 Science, Lab 2" }).first();
+const button = (page, name, exact = true) => {
+  return page.getByRole("button", { name, exact });
+};
+const hostPage = (query) => {
+  return `${query}&page=host&id=K7QX2B`;
+};
+const hostReady = (page) => {
+  return page.getByRole("heading", { name: "Year 9 Science, Lab 2" }).first();
+};
+const joinReady = (page) => {
+  return page.getByRole("heading", { name: "Year 9 Science, Lab 2" }).first();
+};
 
-async function shot(p, file, { wait = 900 } = {}) {
+// Waits a moment (with the pointer out of the way), then saves the page as raw/<file>.png.
+async function shot(page, file, { wait = 900 } = {}) {
   // The pointer off anything with a tooltip: the window's bottom left corner.
-  await p.mouse.move(1, p.viewportSize().height - 1);
-  await p.waitForTimeout(wait);
-  await p.screenshot({ path: `${OUT}${file}.png` });
+  await page.mouse.move(1, page.viewportSize().height - 1);
+  await page.waitForTimeout(wait);
+  await page.screenshot({ path: `${OUTPUT_FOLDER}${file}.png` });
   console.log(file);
 }
 
+// Ignores a wait that timed out: the picture is taken either way.
+const ignoreTimeout = () => {};
+
 // The eight screens, in the order the store shows them.
 async function screens(browser, set, viewport, scale) {
-  const q = (s = "") => `?android=1${s}`;
-  const uwu = { "app.look": "uwuapps" };
+  const androidQuery = (extra = "") => {
+    return `?android=1${extra}`;
+  };
+  const uwuAppsLook = { "app.look": "uwuapps" };
 
-  let { context, page: p } = await open(browser, { viewport, scale, query: q(), seed: uwu });
-  await shot(p, `${set}-01-home`);
+  let { context, page } = await open(browser, { viewport, scale, query: androidQuery(), seed: uwuAppsLook });
+  await shot(page, `${set}-01-home`);
   await context.close();
 
-  ({ context, page: p } = await open(browser, { viewport, scale, query: hostPage(q()), seed: uwu, ready: hostReady }));
+  ({ context, page } = await open(browser, { viewport, scale, query: hostPage(androidQuery()), seed: uwuAppsLook, ready: hostReady }));
   // Same wifi ready (through PeerJS's broker).
-  await p.getByText(/^Ready for same-wifi check-ins/).first().waitFor({ timeout: 20000 }).catch(() => {});
-  await shot(p, `${set}-02-host`);
+  await page.getByText(/^Ready for same-wifi check-ins/).first().waitFor({ timeout: 20000 }).catch(ignoreTimeout);
+  await shot(page, `${set}-02-host`);
   // Further down: the list.
-  await p.mouse.move(viewport.width / 2, viewport.height * 0.6);
-  for (let i = 0; i < 9; i++) {
-    await p.mouse.wheel(0, 300);
-    await p.waitForTimeout(100);
+  await page.mouse.move(viewport.width / 2, viewport.height * 0.6);
+  for (let scrollStep = 0; scrollStep < 9; scrollStep = scrollStep + 1) {
+    await page.mouse.wheel(0, 300);
+    await page.waitForTimeout(100);
   }
-  await shot(p, `${set}-03-list`);
+  await shot(page, `${set}-03-list`);
   await context.close();
 
-  ({ context, page: p } = await open(browser, { viewport, scale, query: `${q()}&page=join&id=K7QX2B`, seed: uwu, ready: joinReady }));
-  await shot(p, `${set}-04-checkin`);
+  ({ context, page } = await open(browser, { viewport, scale, query: `${androidQuery()}&page=join&id=K7QX2B`, seed: uwuAppsLook, ready: joinReady }));
+  await shot(page, `${set}-04-checkin`);
   await context.close();
 
-  ({ context, page: p } = await open(browser, { viewport, scale, query: hostPage(q("&wallpaper=1")), seed: { "app.look": "material" }, ready: hostReady }));
-  await btn(p, "Show the QR code big").click();
-  await p.getByRole("heading", { name: "Scan to check in" }).waitFor();
-  await shot(p, `${set}-05-qr`);
+  ({ context, page } = await open(browser, { viewport, scale, query: hostPage(androidQuery("&wallpaper=1")), seed: { "app.look": "material" }, ready: hostReady }));
+  await button(page, "Show the QR code big").click();
+  await page.getByRole("heading", { name: "Scan to check in" }).waitFor();
+  await shot(page, `${set}-05-qr`);
   await context.close();
 
-  ({ context, page: p } = await open(browser, { viewport, scale, query: q(), seed: { ...uwu, "uwuhere.colorTheme": "not-green-4" } }));
-  await btn(p, "Theme").click();
-  await p.getByRole("heading", { name: "Theme" }).waitFor();
-  await shot(p, `${set}-06-theme`);
+  ({ context, page } = await open(browser, { viewport, scale, query: androidQuery(), seed: { ...uwuAppsLook, "uwuhere.colorTheme": "not-green-4" } }));
+  await button(page, "Theme").click();
+  await page.getByRole("heading", { name: "Theme" }).waitFor();
+  await shot(page, `${set}-06-theme`);
   await context.close();
 
-  ({ context, page: p } = await open(browser, { viewport, scale, query: q("&wallpaper=1"), seed: { "app.look": "material" } }));
-  await btn(p, "Check for updates").click();
-  await p.getByText("Every version").waitFor();
+  ({ context, page } = await open(browser, { viewport, scale, query: androidQuery("&wallpaper=1"), seed: { "app.look": "material" } }));
+  await button(page, "Check for updates").click();
+  await page.getByText("Every version").waitFor();
   // "You have the newest version" gone first.
-  await shot(p, `${set}-07-updates`, { wait: 4000 });
+  await shot(page, `${set}-07-updates`, { wait: 4000 });
   await context.close();
 
-  ({ context, page: p } = await open(browser, {
+  ({ context, page } = await open(browser, {
     viewport,
     scale,
-    query: hostPage(q()),
-    seed: { ...uwu, "uwuhere.mode": "dark", "uwuhere.tour.welcome": "done" },
+    query: hostPage(androidQuery()),
+    seed: { ...uwuAppsLook, "uwuhere.mode": "dark", "uwuhere.tour.welcome": "done" },
     tours: true,
     ready: hostReady,
   }));
-  await btn(p, "Skip").waitFor({ timeout: 10000 });
-  await btn(p, "Next").click();
-  await p.waitForTimeout(800);
-  await shot(p, `${set}-08-dark-tour`);
+  await button(page, "Skip").waitFor({ timeout: 10000 });
+  await button(page, "Next").click();
+  await page.waitForTimeout(800);
+  await shot(page, `${set}-08-dark-tour`);
   await context.close();
 }
 
+// The eight desktop screens: the desktop app's window at 1440 × 900, and Make it yours.
 async function desktop(browser) {
   const viewport = { width: 1440, height: 900 };
   const scale = 2;
-  const q = "?desktop=1";
-  const uwu = { "app.look": "uwuapps" };
-  let { context, page: p } = await open(browser, { viewport, scale, query: q, seed: uwu });
-  await shot(p, "desktop-01-home");
+  const desktopQuery = "?desktop=1";
+  const uwuAppsLook = { "app.look": "uwuapps" };
+  let { context, page } = await open(browser, { viewport, scale, query: desktopQuery, seed: uwuAppsLook });
+  await shot(page, "desktop-01-home");
 
-  await p.getByRole("button", { name: /^Year 9 Science/ }).click();
-  await hostReady(p).waitFor();
-  await p.getByText(/^Ready for same-wifi check-ins/).first().waitFor({ timeout: 20000 }).catch(() => {});
-  await shot(p, "desktop-02-host");
+  await page.getByRole("button", { name: /^Year 9 Science/ }).click();
+  await hostReady(page).waitFor();
+  await page.getByText(/^Ready for same-wifi check-ins/).first().waitFor({ timeout: 20000 }).catch(ignoreTimeout);
+  await shot(page, "desktop-02-host");
 
   // The command bar, in the middle of the title bar.
-  await p.keyboard.press("Control+k");
-  await p.waitForTimeout(400);
-  await p.getByRole("textbox", { name: /^Search/ }).click();
-  await p.waitForTimeout(400);
-  await p.keyboard.type("b", { delay: 40 });
-  await p.waitForTimeout(500);
-  await shot(p, "desktop-03-command");
-  await p.keyboard.press("Escape");
-  await p.waitForTimeout(300);
+  await page.keyboard.press("Control+k");
+  await page.waitForTimeout(400);
+  await page.getByRole("textbox", { name: /^Search/ }).click();
+  await page.waitForTimeout(400);
+  await page.keyboard.type("b", { delay: 40 });
+  await page.waitForTimeout(500);
+  await shot(page, "desktop-03-command");
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(300);
 
-  await btn(p, "Show the QR code").click();
-  await p.getByRole("heading", { name: "Scan to check in" }).waitFor();
-  await shot(p, "desktop-04-qr");
+  await button(page, "Show the QR code").click();
+  await page.getByRole("heading", { name: "Scan to check in" }).waitFor();
+  await shot(page, "desktop-04-qr");
   await context.close();
 
-  ({ context, page: p } = await open(browser, { viewport, scale, query: `${q}&page=join&id=K7QX2B`, seed: uwu, ready: joinReady }));
-  await shot(p, "desktop-05-checkin");
+  ({ context, page } = await open(browser, { viewport, scale, query: `${desktopQuery}&page=join&id=K7QX2B`, seed: uwuAppsLook, ready: joinReady }));
+  await shot(page, "desktop-05-checkin");
   await context.close();
 
-  ({ context, page: p } = await open(browser, {
+  ({ context, page } = await open(browser, {
     viewport: { width: 940, height: 660 },
     scale,
     query: "?welcome=1",
     seed: { "uwuhere.colorTheme": "classic" },
-    ready: (x) => x.getByText("Get started"),
+    ready: (welcomePage) => {
+      return welcomePage.getByText("Get started");
+    },
   }));
-  await shot(p, "desktop-06-welcome");
+  await shot(page, "desktop-06-welcome");
   await context.close();
 
-  ({ context, page: p } = await open(browser, { viewport, scale, query: hostPage(q), seed: { ...uwu, "uwuhere.mode": "dark", "uwuhere.colorTheme": "not-green-2" }, ready: hostReady }));
-  await shot(p, "desktop-07-dark");
+  ({ context, page } = await open(browser, { viewport, scale, query: hostPage(desktopQuery), seed: { ...uwuAppsLook, "uwuhere.mode": "dark", "uwuhere.colorTheme": "not-green-2" }, ready: hostReady }));
+  await shot(page, "desktop-07-dark");
   await context.close();
 
-  ({ context, page: p } = await open(browser, { viewport, scale, query: hostPage(q), seed: uwu, ready: hostReady }));
-  await btn(p, "Event settings").click();
-  await p.getByRole("heading", { name: "Event settings" }).waitFor();
-  await shot(p, "desktop-08-settings");
+  ({ context, page } = await open(browser, { viewport, scale, query: hostPage(desktopQuery), seed: uwuAppsLook, ready: hostReady }));
+  await button(page, "Event settings").click();
+  await page.getByRole("heading", { name: "Event settings" }).waitFor();
+  await shot(page, "desktop-08-settings");
   await context.close();
 }
 
 const browser = await chromium.launch();
-const only = process.argv[2];
+const onlySet = process.argv[2];
 try {
-  if (!only || only === "phone") await screens(browser, "phone", { width: 412, height: 892 }, 3);
-  if (!only || only === "tablet7") await screens(browser, "tablet7", { width: 600, height: 1000 }, 2.7);
-  if (!only || only === "tablet10") await screens(browser, "tablet10", { width: 1280, height: 800 }, 2);
-  if (!only || only === "desktop") await desktop(browser);
+  if (!onlySet || onlySet === "phone") {
+    await screens(browser, "phone", { width: 412, height: 892 }, 3);
+  }
+  if (!onlySet || onlySet === "tablet7") {
+    await screens(browser, "tablet7", { width: 600, height: 1000 }, 2.7);
+  }
+  if (!onlySet || onlySet === "tablet10") {
+    await screens(browser, "tablet10", { width: 1280, height: 800 }, 2);
+  }
+  if (!onlySet || onlySet === "desktop") {
+    await desktop(browser);
+  }
 } finally {
   await browser.close();
 }

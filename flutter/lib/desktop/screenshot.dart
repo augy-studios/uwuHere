@@ -24,43 +24,59 @@ class Screenshots {
   Screenshots._();
 
   static final ValueNotifier<bool> busy = ValueNotifier(false);
-  static const maxHeight = 16384.0;
+  static const maximumHeight = 16384.0;
 
+  /// Now as "YYYY-MM-DD HH.MM.SS", for the file's name.
   static String _stamp() {
-    final n = DateTime.now();
-    String two(int v) => v.toString().padLeft(2, '0');
-    return '${n.year}-${two(n.month)}-${two(n.day)} ${two(n.hour)}.${two(n.minute)}.${two(n.second)}';
+    final now = DateTime.now();
+    String twoDigits(int value) {
+      return value.toString().padLeft(2, '0');
+    }
+
+    return '${now.year}-${twoDigits(now.month)}-${twoDigits(now.day)} ${twoDigits(now.hour)}.${twoDigits(now.minute)}.${twoDigits(now.second)}';
   }
 
-  static Future<ui.Image?> _capture(GlobalKey key, double ratio) async {
-    final box = key.currentContext?.findRenderObject();
+  /// A picture of what's under [key]'s repaint boundary, on the page's own solid background.
+  static Future<ui.Image?> _capture(GlobalKey key, double pixelRatio) async {
+    final boundaryContext = key.currentContext;
+    RenderObject? box;
+    if (boundaryContext != null) box = boundaryContext.findRenderObject();
     if (box is! RenderRepaintBoundary) return null;
     if (box.debugNeedsPaint) await Future<void>.delayed(const Duration(milliseconds: 40));
-    final shot = await box.toImage(pixelRatio: ratio);
+    final shot = await box.toImage(pixelRatio: pixelRatio);
     final context = key.currentContext;
-    return context == null || !context.mounted ? shot : PageShots.solid(shot, UwuColors.of(context));
+    if (context == null || !context.mounted) return shot;
+    return PageShots.solid(shot, UwuColors.of(context));
   }
 
-  static Future<void> _save(ui.Image image, String name, String said) async {
+  /// Saves [image] in Downloads as [name], copies it to the clipboard, and says so with a toast
+  /// and a notification titled [notificationTitle] that shows the file in its folder.
+  static Future<void> _save(ui.Image image, String name, String notificationTitle) async {
     final data = await image.toByteData(format: ui.ImageByteFormat.png);
     if (data == null) throw StateError('no picture');
     final bytes = data.buffer.asUint8List();
-    final dir = Directory(Desktop.downloads)..createSync(recursive: true);
-    final file = File('${dir.path}${Platform.pathSeparator}$name');
+    final downloadsFolder = Directory(Desktop.downloads)..createSync(recursive: true);
+    final file = File('${downloadsFolder.path}${Platform.pathSeparator}$name');
     await file.writeAsBytes(bytes);
     try {
       await Pasteboard.writeImage(bytes);
     } catch (_) {}
     AppNav.toast('Screenshot copied and saved');
-    DeskNotify.show(title: said, body: name, onClick: () => Desktop.showInFolder(file.path));
+    DeskNotify.show(
+      title: notificationTitle,
+      body: name,
+      onClick: () {
+        Desktop.showInFolder(file.path);
+      },
+    );
   }
 
   static Future<void> take(BuildContext context) async {
     if (busy.value) return;
     busy.value = true;
     try {
-      final ratio = MediaQuery.devicePixelRatioOf(context);
-      final image = await _capture(AppNav.repaintKey, ratio);
+      final pixelRatio = MediaQuery.devicePixelRatioOf(context);
+      final image = await _capture(AppNav.repaintKey, pixelRatio);
       if (image == null) throw StateError('nothing to capture');
       await _save(image, '${Desktop.name} ${_stamp()}.png', 'Screenshot saved');
     } catch (_) {
@@ -75,7 +91,7 @@ class Screenshots {
     if (busy.value) return;
     busy.value = true;
     try {
-      final image = await PageShots.whole(AppPages.active(), ratio: MediaQuery.devicePixelRatioOf(context), maxHeight: maxHeight);
+      final image = await PageShots.whole(AppPages.active(), ratio: MediaQuery.devicePixelRatioOf(context), maxHeight: maximumHeight);
       if (image == null) throw StateError('nothing drawn');
       await _save(image, '${Desktop.name} ${_stamp()} (long).png', 'Long screenshot saved');
     } catch (_) {

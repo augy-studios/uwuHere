@@ -26,8 +26,17 @@ import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import bcrypt from "bcryptjs";
 import { HttpError } from "./http.js";
 
-const SECRET = process.env.UWUHERE_HOST_SECRET || "";
-const PEPPER = process.env.UWUHERE_PASSWORD_PEPPER || "";
+// An environment variable's value, or "" when it is not set or empty.
+function environmentValue(name) {
+  const value = process.env[name];
+  if (value) {
+    return value;
+  }
+  return "";
+}
+
+const SECRET = environmentValue("UWUHERE_HOST_SECRET");
+const PEPPER = environmentValue("UWUHERE_PASSWORD_PEPPER");
 
 // OWASP's floor is 10. 12 is a few hundred milliseconds in bcryptjs on a
 // function: slow enough to make guessing expensive, quick enough that a host
@@ -45,11 +54,18 @@ export function hostKeyFor(eventId) {
   return createHmac("sha256", SECRET).update(`uwuhere-host:${eventId}`).digest("base64url");
 }
 
-export function isHostKey(eventId, given) {
-  if (typeof given !== "string" || given.length === 0 || given.length > 128) return false;
+// Whether `givenKey` is the event's host key, compared in constant time so
+// the answer's timing gives nothing away.
+export function isHostKey(eventId, givenKey) {
+  if (typeof givenKey !== "string" || givenKey.length === 0 || givenKey.length > 128) {
+    return false;
+  }
   const expected = Buffer.from(hostKeyFor(eventId));
-  const actual = Buffer.from(given);
-  return actual.length === expected.length && timingSafeEqual(actual, expected);
+  const actual = Buffer.from(givenKey);
+  if (actual.length !== expected.length) {
+    return false;
+  }
+  return timingSafeEqual(actual, expected);
 }
 
 export function requirePepper() {
@@ -69,10 +85,12 @@ export async function hashPassword(password) {
   return bcrypt.hash(peppered(password), BCRYPT_COST);
 }
 
-export async function verifyPassword(password, stored) {
+export async function verifyPassword(password, storedHash) {
   requirePepper();
-  if (typeof stored !== "string" || !/^\$2[aby]\$\d{2}\$/.test(stored)) return false;
-  return bcrypt.compare(peppered(password), stored);
+  if (typeof storedHash !== "string" || !/^\$2[aby]\$\d{2}\$/.test(storedHash)) {
+    return false;
+  }
+  return bcrypt.compare(peppered(password), storedHash);
 }
 
 export function hashDevice(deviceId) {

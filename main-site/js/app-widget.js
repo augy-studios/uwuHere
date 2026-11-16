@@ -14,41 +14,82 @@ import { AppBridge } from "./app-bridge.js";
 
 // Said again once a minute even when nothing changed, so the widget's
 // "Updated" time keeps up while the host page is open.
-const RESAY_MS = 60000;
+const RESAY_INTERVAL_MILLISECONDS = 60000;
 
 let lastSaid = "";
 let lastSaidAt = 0;
 
+// Whether this is an app that has the widget, once the app has answered.
 async function available() {
-  return AppBridge.native && (await AppBridge.ready(5000)) && AppBridge.has("widget");
+  if (!AppBridge.native) {
+    return false;
+  }
+  const appAnswered = await AppBridge.ready(5000);
+  if (!appAnswered) {
+    return appAnswered;
+  }
+  return AppBridge.has("widget");
+}
+
+// A value, or null when it is null or undefined.
+function valueOrNull(value) {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  return value;
 }
 
 /** The numbers the widget shows. WidgetData.summarise works out the same. */
 function summary(code, hostKey, event, attendees) {
   let latest = null;
-  for (const a of attendees) {
-    if (!latest || Date.parse(a.checkedInAt) > Date.parse(latest.checkedInAt)) latest = a;
+  for (const attendee of attendees) {
+    if (!latest || Date.parse(attendee.checkedInAt) > Date.parse(latest.checkedInAt)) {
+      latest = attendee;
+    }
   }
+
+  let title = "";
+  if (event.title) {
+    title = event.title;
+  }
+
+  let latestName = null;
+  let latestAt = null;
+  if (latest !== null) {
+    latestName = valueOrNull(latest.name);
+    latestAt = valueOrNull(latest.checkedInAt);
+  }
+
+  const leftEarlyCount = attendees.filter((attendee) => {
+    return attendee.leftEarlyAt;
+  }).length;
+
   return {
     code,
     hostKey,
-    title: event.title || "",
+    title,
     paused: Boolean(event.paused),
     ended: Boolean(event.ended),
     count: attendees.length,
-    left: attendees.filter((a) => a.leftEarlyAt).length,
-    latestName: latest?.name ?? null,
-    latestAt: latest?.checkedInAt ?? null,
+    left: leftEarlyCount,
+    latestName,
+    latestAt,
   };
 }
 
 /** The event as the host page has just had it from the server. */
 export async function tellWidget(code, hostKey, event, attendees) {
-  if (!AppBridge.native || !hostKey || !event) return;
+  if (!AppBridge.native || !hostKey || !event) {
+    return;
+  }
   const said = summary(code, hostKey, event, attendees);
   const key = JSON.stringify(said);
-  if (key === lastSaid && Date.now() - lastSaidAt < RESAY_MS) return;
-  if (!(await available())) return;
+  if (key === lastSaid && Date.now() - lastSaidAt < RESAY_INTERVAL_MILLISECONDS) {
+    return;
+  }
+  if (!(await available())) {
+    return;
+  }
   lastSaid = key;
   lastSaidAt = Date.now();
   AppBridge.call("Here", "widget", said).catch(() => {
@@ -58,8 +99,12 @@ export async function tellWidget(code, hostKey, event, attendees) {
 
 /** This phone no longer hosts the event: off the widget, if it was there. */
 export async function forgetWidget(code) {
-  if (!AppBridge.native) return;
+  if (!AppBridge.native) {
+    return;
+  }
   lastSaid = "";
-  if (!(await available())) return;
+  if (!(await available())) {
+    return;
+  }
   AppBridge.call("Here", "widget", { code, clear: true }).catch(() => {});
 }

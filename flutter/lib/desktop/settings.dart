@@ -16,41 +16,78 @@ class DeskSettings {
   static const folderName = 'uwuHere';
 
   /// %APPDATA%\uwuHere, ~/Library/Application Support/uwuHere, or ~/.config/uwuHere.
-  static String get dir {
-    final env = Platform.environment;
-    if (Platform.isWindows) return '${env['APPDATA'] ?? '${env['USERPROFILE']}\\AppData\\Roaming'}\\$folderName';
-    final home = env['HOME'] ?? '';
+  static String get directory {
+    final environment = Platform.environment;
+    if (Platform.isWindows) {
+      String appDataFolder;
+      final appDataVariable = environment['APPDATA'];
+      if (appDataVariable == null) {
+        appDataFolder = '${environment['USERPROFILE']}\\AppData\\Roaming';
+      } else {
+        appDataFolder = appDataVariable;
+      }
+      return '$appDataFolder\\$folderName';
+    }
+    String home;
+    final homeVariable = environment['HOME'];
+    if (homeVariable == null) {
+      home = '';
+    } else {
+      home = homeVariable;
+    }
     if (Platform.isMacOS) return '$home/Library/Application Support/$folderName';
-    return '${env['XDG_CONFIG_HOME'] ?? '$home/.config'}/$folderName';
+    String configFolder;
+    final configVariable = environment['XDG_CONFIG_HOME'];
+    if (configVariable == null) {
+      configFolder = '$home/.config';
+    } else {
+      configFolder = configVariable;
+    }
+    return '$configFolder/$folderName';
   }
 
   /// For tests: another folder.
   static String? override;
 
-  static String get folder => override ?? dir;
-  static File get _file => File('$folder${Platform.pathSeparator}settings.json');
+  /// The folder in use: the test's [override] if there is one, otherwise the system's [directory].
+  static String get folder {
+    final overrideFolder = override;
+    if (overrideFolder != null) return overrideFolder;
+    return directory;
+  }
+
+  static File get _file {
+    return File('$folder${Platform.pathSeparator}settings.json');
+  }
 
   static Map<String, dynamic> read() {
     try {
-      final v = jsonDecode(_file.readAsStringSync());
-      return v is Map<String, dynamic> ? v : {};
+      final decoded = jsonDecode(_file.readAsStringSync());
+      if (decoded is Map<String, dynamic>) return decoded;
+      return {};
     } catch (_) {
       return {};
     }
   }
 
-  static T? get<T>(String key) {
-    final v = read()[key];
-    return v is T ? v : null;
+  static ValueType? get<ValueType>(String key) {
+    final value = read()[key];
+    if (value is ValueType) return value;
+    return null;
   }
 
+  /// Merges [changes] into what's kept (a null value removes its key), written to a temporary
+  /// file first and then moved into place, so a half-written file is never left behind.
   static void write(Map<String, dynamic> changes) {
     try {
       _file.parent.createSync(recursive: true);
-      final now = {...read(), ...changes}..removeWhere((k, v) => v == null);
-      final tmp = File('${_file.path}.tmp');
-      tmp.writeAsStringSync(jsonEncode(now));
-      tmp.renameSync(_file.path);
+      final merged = {...read(), ...changes}
+        ..removeWhere((key, value) {
+          return value == null;
+        });
+      final temporaryFile = File('${_file.path}.tmp');
+      temporaryFile.writeAsStringSync(jsonEncode(merged));
+      temporaryFile.renameSync(_file.path);
     } catch (_) {
       // Not kept: the default comes back next time.
     }

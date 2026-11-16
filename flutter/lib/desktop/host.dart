@@ -19,6 +19,7 @@ import 'notify.dart';
 import 'settings.dart';
 
 class DesktopHost implements NativeHost {
+  /// Answers the 'App' plugin's methods here, and hands the 'Here' plugin's to [_here].
   @override
   Future<Map<String, dynamic>?> call(String plugin, String method, Map<String, dynamic> options) async {
     if (plugin == 'Here') return _here(method, options);
@@ -34,12 +35,20 @@ class DesktopHost implements NativeHost {
         };
       case 'launchLink':
         final link = Desktop.linkIn(Desktop.launchArgs);
-        return {'url': ?link};
+        final result = <String, dynamic>{};
+        if (link != null) result['url'] = link;
+        return result;
       case 'openLink':
         await Desktop.openExternal('${options['url']}');
         return null;
       case 'notify':
-        await DeskNotify.show(title: '${options['title'] ?? ''}', body: '${options['body'] ?? ''}', link: options['link'] as String?);
+        final title = options['title'];
+        String titleText = '';
+        if (title != null) titleText = '$title';
+        final body = options['body'];
+        String bodyText = '';
+        if (body != null) bodyText = '$body';
+        await DeskNotify.show(title: titleText, body: bodyText, link: options['link'] as String?);
         return null;
       case 'background':
         await Desktop.hide();
@@ -48,31 +57,40 @@ class DesktopHost implements NativeHost {
     throw NativeError('No method $method', code: 'unavailable');
   }
 
-  Future<Map<String, dynamic>?> _here(String method, Map<String, dynamic> o) async {
+  /// The 'Here' plugin: the notification topics kept in the settings file, and the system's
+  /// location settings page.
+  Future<Map<String, dynamic>?> _here(String method, Map<String, dynamic> options) async {
     switch (method) {
       case 'topics':
         return {
-          'checkins': DeskSettings.get<bool>('alertsCheckins') ?? true,
-          'releases': DeskSettings.get<bool>('updateNotices') ?? true,
+          'checkins': _settingOrTrue('alertsCheckins'),
+          'releases': _settingOrTrue('updateNotices'),
           'news': false,
         };
       case 'setTopic':
-        final on = o['on'] == true;
-        switch (o['topic']) {
+        final isOn = options['on'] == true;
+        switch (options['topic']) {
           case 'checkins':
-            DeskSettings.write({'alertsCheckins': on});
+            DeskSettings.write({'alertsCheckins': isOn});
             AlertsPoll.restart();
           case 'releases':
-            DeskSettings.write({'updateNotices': on});
+            DeskSettings.write({'updateNotices': isOn});
           default:
             throw NativeError('News comes to the Android app only', code: 'unavailable');
         }
-        return {'topic': o['topic'], 'on': on};
+        return {'topic': options['topic'], 'on': isOn};
       case 'openSettings':
         if (Platform.isWindows) await Desktop.openExternal('ms-settings:privacy-location');
         if (Platform.isMacOS) await Desktop.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_LocationServices');
         return null;
     }
     throw NativeError('No method $method', code: 'unavailable');
+  }
+
+  /// A yes-or-no setting, true when it was never set.
+  bool _settingOrTrue(String key) {
+    final setting = DeskSettings.get<bool>(key);
+    if (setting == null) return true;
+    return setting;
   }
 }

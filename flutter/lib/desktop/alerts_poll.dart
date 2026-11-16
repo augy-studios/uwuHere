@@ -22,13 +22,20 @@ class AlertsPoll {
   /// What's been seen, per event: attendee ids by location, and ids that had left early.
   static final Map<String, Set<String>> _seen = {};
 
-  static bool get on => DeskSettings.get<bool>('alertsCheckins') ?? true;
+  /// Whether "Check-ins to my events" is on (it is unless it was turned off).
+  static bool get isOn {
+    final setting = DeskSettings.get<bool>('alertsCheckins');
+    if (setting == null) return true;
+    return setting;
+  }
 
   static void start() {
-    _timer?.cancel();
-    if (!on) return;
+    if (_timer != null) _timer!.cancel();
+    if (!isOn) return;
     _check();
-    _timer = Timer.periodic(const Duration(minutes: 1), (_) => _check());
+    _timer = Timer.periodic(const Duration(minutes: 1), (_) {
+      _check();
+    });
   }
 
   static void restart() {
@@ -36,28 +43,49 @@ class AlertsPoll {
     start();
   }
 
+  /// One look at every hosted event that hasn't ended: anyone new by location or newly left
+  /// early since the last look becomes one notification per event.
   static Future<void> _check() async {
-    if (!on) return;
-    for (final ev in HereStore.listHosted()) {
-      if (ev.ended || ev.hostKey.isEmpty) continue;
-      final r = await Api.post('host', {'code': ev.code, 'hostKey': ev.hostKey, 'action': 'get'});
-      if (!r.ok) continue;
-      final event = r.map['event'];
-      final list = r.map['attendees'];
-      if (event is! Map || list is! List) continue;
-      final first = !_seen.containsKey(ev.code);
-      final seen = _seen.putIfAbsent(ev.code, () => <String>{});
-      final news = <String>[];
-      for (final a in list) {
-        if (a is! Map) continue;
-        final id = '${a['id']}';
-        if (a['method'] == 'location' && seen.add('in:$id') && !first) news.add('${a['name']} checked in by location.');
-        if (a['leftEarlyAt'] != null && seen.add('left:$id') && !first) news.add('${a['name']} left early.');
+    if (!isOn) return;
+    for (final hostedEvent in HereStore.listHosted()) {
+      if (hostedEvent.ended || hostedEvent.hostKey.isEmpty) continue;
+      final response = await Api.post('host', {'code': hostedEvent.code, 'hostKey': hostedEvent.hostKey, 'action': 'get'});
+      if (!response.ok) continue;
+      final event = response.map['event'];
+      final attendees = response.map['attendees'];
+      if (event is! Map || attendees is! List) continue;
+      final isFirstLook = !_seen.containsKey(hostedEvent.code);
+      final seen = _seen.putIfAbsent(hostedEvent.code, () {
+        return <String>{};
+      });
+      final newMessages = <String>[];
+      for (final attendee in attendees) {
+        if (attendee is! Map) continue;
+        final id = '${attendee['id']}';
+        if (attendee['method'] == 'location') {
+          final isNewlySeen = seen.add('in:$id');
+          if (isNewlySeen && !isFirstLook) newMessages.add('${attendee['name']} checked in by location.');
+        }
+        if (attendee['leftEarlyAt'] != null) {
+          final isNewlySeen = seen.add('left:$id');
+          if (isNewlySeen && !isFirstLook) newMessages.add('${attendee['name']} left early.');
+        }
       }
-      if (news.isEmpty) continue;
-      final title = '${event['title'] ?? ''}'.isEmpty ? 'Event ${ev.code}' : '${event['title']}';
-      final body = news.length == 1 ? '${news.first} ${list.length} checked in so far.' : '${news.first} And ${news.length - 1} more…';
-      await DeskNotify.show(title: title, body: body, link: 'uwu://here/host?id=${ev.code}');
+      if (newMessages.isEmpty) continue;
+      final eventTitle = event['title'];
+      String title;
+      if (eventTitle == null || '$eventTitle'.isEmpty) {
+        title = 'Event ${hostedEvent.code}';
+      } else {
+        title = '$eventTitle';
+      }
+      String body;
+      if (newMessages.length == 1) {
+        body = '${newMessages.first} ${attendees.length} checked in so far.';
+      } else {
+        body = '${newMessages.first} And ${newMessages.length - 1} more…';
+      }
+      await DeskNotify.show(title: title, body: body, link: 'uwu://here/host?id=${hostedEvent.code}');
     }
   }
 }

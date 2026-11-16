@@ -14,27 +14,39 @@ class Migrate {
 
   static const doneKey = 'app.migrated';
 
+  /// Brings the old app's values across, once.
   /// How many values came across this time (0 when it was done before, or there was nothing).
   static Future<int> run(Store store) async {
     if (store.has(doneKey)) return 0;
     Map<String, dynamic> items = const {};
     try {
       if (Native.available && Native.platform == 'android') {
-        final r = await Native.call('App', 'migrate');
-        items = Map<String, dynamic>.from((r?['items'] as Map?) ?? const {});
+        final answer = await Native.call('App', 'migrate');
+        Map? migratedItems;
+        if (answer != null) {
+          migratedItems = answer['items'] as Map?;
+        }
+        if (migratedItems == null) {
+          migratedItems = const {};
+        }
+        items = Map<String, dynamic>.from(migratedItems);
       }
     } catch (_) {
       // Nothing to read: a phone that never had the old app either.
     }
-    var n = 0;
-    items.forEach((k, v) {
+    var copiedCount = 0;
+    items.forEach((key, value) {
       // Only the site's own, and never over anything the app has set since.
-      if (v is! String || store.has(k)) return;
-      if (!k.startsWith('uwuhere.') && !k.startsWith('tour.')) return;
-      store.put(k, v);
-      n++;
+      if (value is! String || store.has(key)) {
+        return;
+      }
+      if (!key.startsWith('uwuhere.') && !key.startsWith('tour.')) {
+        return;
+      }
+      store.put(key, value);
+      copiedCount = copiedCount + 1;
     });
     store.put(doneKey, DateTime.now().millisecondsSinceEpoch.toString());
-    return n;
+    return copiedCount;
   }
 }

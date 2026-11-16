@@ -19,7 +19,7 @@ import { initTours, openTourPicker } from "./tour.js";
 
 // Report a bug's form and its Screenshot a page bar (js/bug-report.js), and Show me around's
 // picker (js/tour.js): the same on every page, so made here rather than written into each.
-const SHARED = `
+const SHARED_MARKUP = `
   <div class="modal-backdrop hidden" id="bugModal">
     <div class="modal glass bug-modal" role="dialog" aria-modal="true" aria-labelledby="bugModalTitle">
       <div class="modal-head">
@@ -61,36 +61,61 @@ const SHARED = `
     </div>
   </div>`;
 
+// Adds the shared modals to the page, and the tray's Report a bug and Show me
+// around buttons.
 function addShared() {
-  document.body.insertAdjacentHTML("beforeend", SHARED);
-  const bug = addTrayButton({ id: "bugBtn", icon: "bug", label: "Report a bug", onClick: () => openBugReport() });
-  const tour = addTrayButton({ id: "tourBtn", icon: "help", label: "Show me around", onClick: () => openTourPicker() });
-  for (const b of [bug, tour]) if (b) b.setAttribute("aria-haspopup", "dialog");
+  document.body.insertAdjacentHTML("beforeend", SHARED_MARKUP);
+  const bugButton = addTrayButton({
+    id: "bugBtn",
+    icon: "bug",
+    label: "Report a bug",
+    onClick: () => {
+      openBugReport();
+    },
+  });
+  const tourButton = addTrayButton({
+    id: "tourBtn",
+    icon: "help",
+    label: "Show me around",
+    onClick: () => {
+      openTourPicker();
+    },
+  });
+  for (const button of [bugButton, tourButton]) {
+    if (button) {
+      button.setAttribute("aria-haspopup", "dialog");
+    }
+  }
 }
 
+// Fills the theme modal's swatches and wires its swatch and mode buttons.
 function buildThemeModal() {
   const grid = document.getElementById("swatchGrid");
-  grid.innerHTML = COLOR_THEMES.map(
-    (t) => `
-      <button class="swatch" data-theme-id="${t.id}" style="--swatch-color:${t.hex}" type="button" aria-label="${t.label}">
+  grid.innerHTML = COLOR_THEMES.map((theme) => {
+    return `
+      <button class="swatch" data-theme-id="${theme.id}" style="--swatch-color:${theme.hex}" type="button" aria-label="${theme.label}">
         <span class="swatch-dot"></span>
-        <span class="swatch-label">${t.label}</span>
-      </button>`
-  ).join("");
+        <span class="swatch-label">${theme.label}</span>
+      </button>`;
+  }).join("");
 
   syncThemeModalState();
 
-  grid.addEventListener("click", (e) => {
-    const btn = e.target.closest("[data-theme-id]");
-    if (!btn) return;
-    applyColorTheme(btn.dataset.themeId);
+  grid.addEventListener("click", (event) => {
+    const swatchButton = event.target.closest("[data-theme-id]");
+    if (!swatchButton) {
+      return;
+    }
+    applyColorTheme(swatchButton.dataset.themeId);
     syncThemeModalState();
   });
 
-  document.getElementById("modeToggle").addEventListener("click", (e) => {
-    const btn = e.target.closest("[data-mode]");
-    if (!btn) return;
-    applyMode(btn.dataset.mode);
+  document.getElementById("modeToggle").addEventListener("click", (event) => {
+    const modeButton = event.target.closest("[data-mode]");
+    if (!modeButton) {
+      return;
+    }
+    applyMode(modeButton.dataset.mode);
     syncThemeModalState();
   });
 
@@ -99,18 +124,20 @@ function buildThemeModal() {
   document.addEventListener("uwu:modechange", syncThemeModalState);
 }
 
+// Marks the active swatch and mode button, and updates the clock note and the
+// theme button's icon.
 function syncThemeModalState() {
   const activeTheme = getStoredColorTheme();
   const activePreference = getModePreference();
   const resolvedMode = getStoredMode();
 
-  document.querySelectorAll("#swatchGrid .swatch").forEach((el) => {
-    el.classList.toggle("active", el.dataset.themeId === activeTheme);
+  document.querySelectorAll("#swatchGrid .swatch").forEach((swatch) => {
+    swatch.classList.toggle("active", swatch.dataset.themeId === activeTheme);
   });
-  document.querySelectorAll("#modeToggle .mode-btn").forEach((el) => {
-    const isActive = el.dataset.mode === activePreference;
-    el.classList.toggle("active", isActive);
-    el.setAttribute("aria-pressed", String(isActive));
+  document.querySelectorAll("#modeToggle .mode-btn").forEach((modeButton) => {
+    const isActive = modeButton.dataset.mode === activePreference;
+    modeButton.classList.toggle("active", isActive);
+    modeButton.setAttribute("aria-pressed", String(isActive));
   });
 
   const note = document.getElementById("modeNote");
@@ -125,27 +152,47 @@ function syncThemeModalState() {
 }
 
 function updateThemeButtonIcon() {
-  const span = document.querySelector("#themeBtn [data-icon]");
-  if (!span) return;
-  span.setAttribute("data-icon", getStoredMode() === "dark" ? "moon" : "sun");
+  const iconSpan = document.querySelector("#themeBtn [data-icon]");
+  if (!iconSpan) {
+    return;
+  }
+  let iconName;
+  if (getStoredMode() === "dark") {
+    iconName = "moon";
+  } else {
+    iconName = "sun";
+  }
+  iconSpan.setAttribute("data-icon", iconName);
   hydrateIcons(document.getElementById("themeBtn"));
 }
 
+// Every way to close a modal (its close button, a tap on the backdrop, Escape
+// for the topmost one), and the theme button opening the theme modal.
 function wireModals() {
-  document.querySelectorAll("[data-close-modal]").forEach((btn) => {
-    btn.addEventListener("click", () => closeModal(btn.dataset.closeModal));
-  });
-  document.querySelectorAll(".modal-backdrop").forEach((backdrop) => {
-    backdrop.addEventListener("click", (e) => {
-      if (e.target === backdrop) closeModal(backdrop.id);
+  document.querySelectorAll("[data-close-modal]").forEach((closeButton) => {
+    closeButton.addEventListener("click", () => {
+      closeModal(closeButton.dataset.closeModal);
     });
   });
-  document.addEventListener("keydown", (e) => {
-    if (e.key !== "Escape") return;
-    const open = [...document.querySelectorAll(".modal-backdrop:not(.hidden)")].pop();
-    if (open) closeModal(open.id);
+  document.querySelectorAll(".modal-backdrop").forEach((backdrop) => {
+    backdrop.addEventListener("click", (event) => {
+      if (event.target === backdrop) {
+        closeModal(backdrop.id);
+      }
+    });
   });
-  document.getElementById("themeBtn").addEventListener("click", () => openModal("themeModal"));
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") {
+      return;
+    }
+    const topmostOpenModal = [...document.querySelectorAll(".modal-backdrop:not(.hidden)")].pop();
+    if (topmostOpenModal) {
+      closeModal(topmostOpenModal.id);
+    }
+  });
+  document.getElementById("themeBtn").addEventListener("click", () => {
+    openModal("themeModal");
+  });
 }
 
 export function bootShell() {

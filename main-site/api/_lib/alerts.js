@@ -25,16 +25,21 @@ import { fcmConfigured, sendToTopic } from "./fcm.js";
 
 // How long the attendee's request waits for the push. A slow FCM still
 // delivers; this request just stops waiting for it.
-const WAIT_MS = 3000;
+const WAIT_MILLISECONDS = 3000;
 
 export function hostTopic(eventId) {
   const hash = createHash("sha256").update(hostKeyFor(eventId)).digest("hex");
   return `uwuhere-host-${hash.slice(0, 40)}`;
 }
 
+// How many people have checked in to the event so far, or null if the
+// database could not say.
 async function checkedInCount(eventId) {
   const result = await rest("uwuhere_attendees", { query: { event_id: `eq.${eventId}`, select: "id" } });
-  return result.ok && Array.isArray(result.data) ? result.data.length : null;
+  if (result.ok && Array.isArray(result.data)) {
+    return result.data.length;
+  }
+  return null;
 }
 
 /**
@@ -42,18 +47,31 @@ async function checkedInCount(eventId) {
  * attendee's, as they typed it.
  */
 export async function alertHost(event, { kind, name }) {
-  if (!fcmConfigured()) return;
+  if (!fcmConfigured()) {
+    return;
+  }
 
+  // Works out the words of the notification and sends it to the event's topic.
   const send = async () => {
     let body;
     if (kind === "left") {
       body = `${name} left early.`;
     } else {
       const count = await checkedInCount(event.id);
-      body = `${name} checked in by location.` + (count ? ` ${count} checked in so far.` : "");
+      let countSentence = "";
+      if (count) {
+        countSentence = ` ${count} checked in so far.`;
+      }
+      body = `${name} checked in by location.` + countSentence;
     }
+
+    let title = event.title;
+    if (!title) {
+      title = `Event ${event.code}`;
+    }
+
     await sendToTopic(hostTopic(event.id), {
-      title: event.title || `Event ${event.code}`,
+      title,
       body,
       data: { type: "checkin", code: event.code },
       channel: "checkins",
@@ -63,9 +81,18 @@ export async function alertHost(event, { kind, name }) {
     });
   };
 
+  // Whichever comes first: the push finishing, or the wait running out.
   try {
-    await Promise.race([send(), new Promise((resolve) => setTimeout(resolve, WAIT_MS))]);
+    const sending = send();
+    const waitRunsOut = new Promise((resolve) => {
+      setTimeout(resolve, WAIT_MILLISECONDS);
+    });
+    await Promise.race([sending, waitRunsOut]);
   } catch (cause) {
-    console.warn("[uwuhere] host alert not sent:", cause?.message ?? cause);
+    let reason = cause;
+    if (cause !== null && cause !== undefined && cause.message !== null && cause.message !== undefined) {
+      reason = cause.message;
+    }
+    console.warn("[uwuhere] host alert not sent:", reason);
   }
 }

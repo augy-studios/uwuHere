@@ -32,41 +32,90 @@ class GlassPanel extends StatelessWidget {
   final bool blur;
   final Border? border;
 
+  /// In the systems' glass this hands over to NativeGlass. Otherwise it draws a tinted box with
+  /// a border (and, in the glass look, a soft shadow and a blur of what's behind it).
   @override
   Widget build(BuildContext context) {
-    final c = UwuColors.of(context);
-    if (c.native) {
+    final colors = UwuColors.of(context);
+    if (colors.native) {
+      double nativeRadius;
+      if (radius == null) {
+        nativeRadius = colors.panelRadius;
+      } else {
+        nativeRadius = radius!;
+      }
+      Color nativeFill;
+      if (strong) {
+        nativeFill = colors.surfaceStrong;
+      } else {
+        nativeFill = colors.surface;
+      }
       return NativeGlass(
-        radius: radius ?? c.panelRadius,
-        fill: strong ? c.surfaceStrong : c.surface,
+        radius: nativeRadius,
+        fill: nativeFill,
         blur: blur,
         border: border,
         padding: padding,
         child: child,
       );
     }
-    final r = radius ?? 18;
+
+    double cornerRadius;
+    if (radius == null) {
+      cornerRadius = 18;
+    } else {
+      cornerRadius = radius!;
+    }
+
+    Color fillColour;
+    if (strong) {
+      fillColour = colors.surfaceStrong;
+    } else {
+      fillColour = colors.surface;
+    }
+
+    BorderRadius? boxBorderRadius;
+    if (cornerRadius == 0) {
+      boxBorderRadius = null;
+    } else {
+      boxBorderRadius = BorderRadius.circular(cornerRadius);
+    }
+
+    Border boxBorder;
+    if (border == null) {
+      boxBorder = Border.all(color: colors.border);
+    } else {
+      boxBorder = border!;
+    }
+
+    List<BoxShadow>? boxShadows;
+    if (colors.glass) {
+      boxShadows = [
+        BoxShadow(
+          color: Colors.black.withValues(alpha: 0.08),
+          blurRadius: 24,
+          offset: const Offset(0, 8),
+        ),
+      ];
+    } else {
+      boxShadows = null;
+    }
+
     final box = Container(
       padding: padding,
       decoration: BoxDecoration(
-        color: strong ? c.surfaceStrong : c.surface,
-        borderRadius: r == 0 ? null : BorderRadius.circular(r),
-        border: border ?? Border.all(color: c.border),
-        boxShadow: c.glass
-            ? [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.08),
-                  blurRadius: 24,
-                  offset: const Offset(0, 8),
-                ),
-              ]
-            : null,
+        color: fillColour,
+        borderRadius: boxBorderRadius,
+        border: boxBorder,
+        boxShadow: boxShadows,
       ),
       child: child,
     );
-    if (!c.glass || !blur) return box;
+    if (!colors.glass || !blur) {
+      return box;
+    }
     return ClipRRect(
-      borderRadius: BorderRadius.circular(r),
+      borderRadius: BorderRadius.circular(cornerRadius),
       child: BackdropFilter(
         filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
         child: box,
@@ -75,20 +124,35 @@ class GlassPanel extends StatelessWidget {
   }
 }
 
-/// A colour matrix that brightens colours by [s] (1 leaves them), as Apple's materials and
-/// Fluent's Acrylic do to what they blur.
-List<double> saturationMatrix(double s) {
-  const lr = 0.2126, lg = 0.7152, lb = 0.0722;
-  final r = (1 - s) * lr, g = (1 - s) * lg, b = (1 - s) * lb;
-  return [r + s, g, b, 0, 0, r, g + s, b, 0, 0, r, g, b + s, 0, 0, 0, 0, 0, 1, 0];
+/// A colour matrix that brightens colours by [saturation] (1 leaves them), as Apple's materials
+/// and Fluent's Acrylic do to what they blur.
+List<double> saturationMatrix(double saturation) {
+  // How much each of red, green and blue counts towards how bright a colour looks.
+  const redLuminanceWeight = 0.2126, greenLuminanceWeight = 0.7152, blueLuminanceWeight = 0.0722;
+  final redShare = (1 - saturation) * redLuminanceWeight;
+  final greenShare = (1 - saturation) * greenLuminanceWeight;
+  final blueShare = (1 - saturation) * blueLuminanceWeight;
+  return [
+    redShare + saturation, greenShare, blueShare, 0, 0,
+    redShare, greenShare + saturation, blueShare, 0, 0,
+    redShare, greenShare, blueShare + saturation, 0, 0,
+    0, 0, 0, 1, 0,
+  ];
 }
 
 /// The blur behind the systems' glass: what's behind, its colours brightened, then blurred.
-ImageFilter glassFilter(UwuColors c, {double? blur}) {
-  final sigma = blur ?? c.blur;
-  final soft = ImageFilter.blur(sigmaX: sigma, sigmaY: sigma, tileMode: TileMode.mirror);
-  if (c.saturate == 1) return soft;
-  return ImageFilter.compose(outer: soft, inner: ColorFilter.matrix(saturationMatrix(c.saturate)));
+ImageFilter glassFilter(UwuColors colors, {double? blur}) {
+  double sigma;
+  if (blur == null) {
+    sigma = colors.blur;
+  } else {
+    sigma = blur;
+  }
+  final softBlur = ImageFilter.blur(sigmaX: sigma, sigmaY: sigma, tileMode: TileMode.mirror);
+  if (colors.saturate == 1) {
+    return softBlur;
+  }
+  return ImageFilter.compose(outer: softBlur, inner: ColorFilter.matrix(saturationMatrix(colors.saturate)));
 }
 
 /// The systems' glass (lib/theme/theme.dart): a see-through fill over a blur of what's behind it,
@@ -126,42 +190,83 @@ class NativeGlass extends StatelessWidget {
   final Border? border;
   final EdgeInsets? padding;
 
+  /// Layers, from the bottom: the shadow outside the shape, the blur of what's behind, the fill
+  /// and its light, the child, and on top the rim (or the plain [border] in its place).
   @override
   Widget build(BuildContext context) {
-    final c = UwuColors.of(context);
-    final outline = shape ?? RoundedRectangleBorder(borderRadius: BorderRadius.circular(radius ?? c.panelRadius));
-    final dark = c.ink.computeLuminance() > 0.5;
+    final colors = UwuColors.of(context);
+
+    ShapeBorder outline;
+    if (shape == null) {
+      double cornerRadius;
+      if (radius == null) {
+        cornerRadius = colors.panelRadius;
+      } else {
+        cornerRadius = radius!;
+      }
+      outline = RoundedRectangleBorder(borderRadius: BorderRadius.circular(cornerRadius));
+    } else {
+      outline = shape!;
+    }
+
+    // Light ink means a dark page.
+    final dark = colors.ink.computeLuminance() > 0.5;
+
+    Color fillColour;
+    if (fill == null) {
+      fillColour = colors.surface;
+    } else {
+      fillColour = fill!;
+    }
+
+    CustomPainter? rimPainter;
+    ShapeDecoration? plainEdgeDecoration;
+    if (border == null) {
+      rimPainter = _GlassRimPainter(outline, colors.kind, colors.rim, colors.rimShade);
+      plainEdgeDecoration = null;
+    } else {
+      rimPainter = null;
+      plainEdgeDecoration = ShapeDecoration(shape: outline.copyWith(side: border!.top));
+    }
+
     Widget body = CustomPaint(
-      painter: _GlassFillPainter(outline, fill ?? c.surface, c.kind, dark),
-      foregroundPainter: border == null ? _GlassRimPainter(outline, c.kind, c.rim, c.rimShade) : null,
+      painter: _GlassFillPainter(outline, fillColour, colors.kind, dark),
+      foregroundPainter: rimPainter,
       child: Container(
         padding: padding,
-        decoration: border == null ? null : ShapeDecoration(shape: outline.copyWith(side: border!.top)),
+        decoration: plainEdgeDecoration,
         child: child,
       ),
     );
     if (blur) {
       body = ClipPath(
         clipper: ShapeBorderClipper(shape: outline),
-        child: BackdropFilter(filter: glassFilter(c), child: body),
+        child: BackdropFilter(filter: glassFilter(colors), child: body),
       );
     } else {
       body = ClipPath(clipper: ShapeBorderClipper(shape: outline), child: body);
     }
-    if (!shadow) return body;
-    return CustomPaint(painter: _OuterShadowPainter(outline, c.kind, dark), child: body);
+    if (!shadow) {
+      return body;
+    }
+    return CustomPaint(painter: _OuterShadowPainter(outline, colors.kind, dark), child: body);
   }
 }
 
 extension on ShapeBorder {
-  ShapeBorder copyWith({required BorderSide side}) => switch (this) {
-    final RoundedRectangleBorder b => b.copyWith(side: side),
-    final StadiumBorder b => b.copyWith(side: side),
-    final CircleBorder b => b.copyWith(side: side),
-    _ => this,
-  };
+  /// The same shape with the given edge, for the shapes the glass comes in; any other is left
+  /// as it is.
+  ShapeBorder copyWith({required BorderSide side}) {
+    return switch (this) {
+      final RoundedRectangleBorder roundedRectangle => roundedRectangle.copyWith(side: side),
+      final StadiumBorder stadium => stadium.copyWith(side: side),
+      final CircleBorder circle => circle.copyWith(side: side),
+      _ => this,
+    };
+  }
 }
 
+/// The glass's fill: the see-through colour, then a veil of light that differs by system.
 class _GlassFillPainter extends CustomPainter {
   _GlassFillPainter(this.shape, this.fill, this.kind, this.dark);
   final ShapeBorder shape;
@@ -176,52 +281,89 @@ class _GlassFillPainter extends CustomPainter {
     canvas.drawPath(path, Paint()..color = fill);
     switch (kind) {
       case GlassKind.liquid:
-        // The light lying across the top of the glass, thinning to nothing by the middle, and a
-        // little gathered at the bottom where it comes out again.
-        canvas.drawPath(
-          path,
-          Paint()
-            ..shader = LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [
-                Colors.white.withValues(alpha: dark ? 0.10 : 0.34),
-                Colors.white.withValues(alpha: 0),
-                Colors.white.withValues(alpha: 0),
-                Colors.white.withValues(alpha: dark ? 0.04 : 0.12),
-              ],
-              stops: const [0, 0.42, 0.8, 1],
-            ).createShader(rect),
-        );
+        _paintLiquidLight(canvas, path, rect);
       case GlassKind.fluent:
-        // Acrylic's luminosity: an even veil, a touch lighter at the top.
-        canvas.drawPath(
-          path,
-          Paint()
-            ..shader = LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [Colors.white.withValues(alpha: dark ? 0.025 : 0.10), Colors.white.withValues(alpha: 0)],
-            ).createShader(rect),
-        );
+        _paintFluentLight(canvas, path, rect);
       case GlassKind.frosted:
-        canvas.drawPath(
-          path,
-          Paint()
-            ..shader = LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [Colors.white.withValues(alpha: dark ? 0.05 : 0.18), Colors.white.withValues(alpha: 0)],
-            ).createShader(rect),
-        );
+        _paintFrostedLight(canvas, path, rect);
       default:
     }
   }
 
+  /// The light lying across the top of the glass, thinning to nothing by the middle, and a
+  /// little gathered at the bottom where it comes out again.
+  void _paintLiquidLight(Canvas canvas, Path path, Rect rect) {
+    double topAlpha;
+    double bottomAlpha;
+    if (dark) {
+      topAlpha = 0.10;
+      bottomAlpha = 0.04;
+    } else {
+      topAlpha = 0.34;
+      bottomAlpha = 0.12;
+    }
+    canvas.drawPath(
+      path,
+      Paint()
+        ..shader = LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            Colors.white.withValues(alpha: topAlpha),
+            Colors.white.withValues(alpha: 0),
+            Colors.white.withValues(alpha: 0),
+            Colors.white.withValues(alpha: bottomAlpha),
+          ],
+          stops: const [0, 0.42, 0.8, 1],
+        ).createShader(rect),
+    );
+  }
+
+  /// Acrylic's luminosity: an even veil, a touch lighter at the top.
+  void _paintFluentLight(Canvas canvas, Path path, Rect rect) {
+    double topAlpha;
+    if (dark) {
+      topAlpha = 0.025;
+    } else {
+      topAlpha = 0.10;
+    }
+    canvas.drawPath(
+      path,
+      Paint()
+        ..shader = LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [Colors.white.withValues(alpha: topAlpha), Colors.white.withValues(alpha: 0)],
+        ).createShader(rect),
+    );
+  }
+
+  /// Frosted glass: a sheen from the top left corner, fading towards the bottom right.
+  void _paintFrostedLight(Canvas canvas, Path path, Rect rect) {
+    double cornerAlpha;
+    if (dark) {
+      cornerAlpha = 0.05;
+    } else {
+      cornerAlpha = 0.18;
+    }
+    canvas.drawPath(
+      path,
+      Paint()
+        ..shader = LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Colors.white.withValues(alpha: cornerAlpha), Colors.white.withValues(alpha: 0)],
+        ).createShader(rect),
+    );
+  }
+
   @override
-  bool shouldRepaint(_GlassFillPainter old) => old.shape != shape || old.fill != fill || old.kind != kind || old.dark != dark;
+  bool shouldRepaint(_GlassFillPainter oldPainter) {
+    return oldPainter.shape != shape || oldPainter.fill != fill || oldPainter.kind != kind || oldPainter.dark != dark;
+  }
 }
 
+/// The glass's edge, drawn over its content, as each system draws it.
 class _GlassRimPainter extends CustomPainter {
   _GlassRimPainter(this.shape, this.kind, this.rim, this.shade);
   final ShapeBorder shape;
@@ -232,7 +374,12 @@ class _GlassRimPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final rect = Offset.zero & size;
-    Path inset(double by) => shape.getOuterPath(rect.deflate(by));
+
+    // The shape's outline, pulled in by the given distance on every side.
+    Path inset(double distance) {
+      return shape.getOuterPath(rect.deflate(distance));
+    }
+
     switch (kind) {
       case GlassKind.liquid:
         // A fine dark line round the outside, so light glass still shows on a light page, then the
@@ -295,9 +442,13 @@ class _GlassRimPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_GlassRimPainter old) => old.shape != shape || old.kind != kind || old.rim != rim || old.shade != shade;
+  bool shouldRepaint(_GlassRimPainter oldPainter) {
+    return oldPainter.shape != shape || oldPainter.kind != kind || oldPainter.rim != rim || oldPainter.shade != shade;
+  }
 }
 
+/// The glass's shadow, drawn only outside its shape (the inside is clipped away), so the
+/// see-through glass isn't darkened by its own shadow.
 class _OuterShadowPainter extends CustomPainter {
   _OuterShadowPainter(this.shape, this.kind, this.dark);
   final ShapeBorder shape;
@@ -308,27 +459,56 @@ class _OuterShadowPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final rect = Offset.zero & size;
     final path = shape.getOuterPath(rect);
-    final (alpha, blur, dy) = switch (kind) {
-      GlassKind.liquid => (dark ? 0.32 : 0.10, 22.0, 8.0),
-      GlassKind.fluent => (dark ? 0.26 : 0.06, 8.0, 2.0),
-      _ => (dark ? 0.30 : 0.08, 16.0, 6.0),
-    };
+
+    // How dark the shadow is, how soft, and how far down it falls, by system.
+    double shadowAlpha;
+    double blurRadius;
+    double dropDistance;
+    switch (kind) {
+      case GlassKind.liquid:
+        if (dark) {
+          shadowAlpha = 0.32;
+        } else {
+          shadowAlpha = 0.10;
+        }
+        blurRadius = 22.0;
+        dropDistance = 8.0;
+      case GlassKind.fluent:
+        if (dark) {
+          shadowAlpha = 0.26;
+        } else {
+          shadowAlpha = 0.06;
+        }
+        blurRadius = 8.0;
+        dropDistance = 2.0;
+      default:
+        if (dark) {
+          shadowAlpha = 0.30;
+        } else {
+          shadowAlpha = 0.08;
+        }
+        blurRadius = 16.0;
+        dropDistance = 6.0;
+    }
+
     canvas.save();
     canvas.clipPath(Path()
       ..fillType = PathFillType.evenOdd
-      ..addRect(rect.inflate(blur * 3))
+      ..addRect(rect.inflate(blurRadius * 3))
       ..addPath(path, Offset.zero));
     canvas.drawPath(
-      path.shift(Offset(0, dy)),
+      path.shift(Offset(0, dropDistance)),
       Paint()
-        ..color = Colors.black.withValues(alpha: alpha)
-        ..maskFilter = MaskFilter.blur(BlurStyle.normal, blur / 2),
+        ..color = Colors.black.withValues(alpha: shadowAlpha)
+        ..maskFilter = MaskFilter.blur(BlurStyle.normal, blurRadius / 2),
     );
     canvas.restore();
   }
 
   @override
-  bool shouldRepaint(_OuterShadowPainter old) => old.shape != shape || old.kind != kind || old.dark != dark;
+  bool shouldRepaint(_OuterShadowPainter oldPainter) {
+    return oldPainter.shape != shape || oldPainter.kind != kind || oldPainter.dark != dark;
+  }
 }
 
 /// What's behind the whole window in the systems' glass. Where the system shows its own material
@@ -341,45 +521,55 @@ class NativeBackdrop extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final c = UwuColors.of(context);
-    if (!c.native) return const SizedBox.shrink();
+    final colors = UwuColors.of(context);
+    if (!colors.native) {
+      return const SizedBox.shrink();
+    }
     if (ThemeController.I.nativeBackdrop) {
-      final tint = switch (c.kind) {
+      final tint = switch (colors.kind) {
         GlassKind.fluent => 0.0,
         GlassKind.liquid => 0.35,
         _ => 0.62,
       };
-      return ColoredBox(color: c.bg.withValues(alpha: tint));
+      return ColoredBox(color: colors.bg.withValues(alpha: tint));
     }
     return RepaintBoundary(
-      child: CustomPaint(isComplex: true, painter: _GlowPainter(c.bg, c.glow), child: const SizedBox.expand()),
+      child: CustomPaint(isComplex: true, painter: _GlowPainter(colors.bg, colors.glow), child: const SizedBox.expand()),
     );
   }
 }
 
+/// The page's colour with up to three soft round glows over it, standing in for a wallpaper.
 class _GlowPainter extends CustomPainter {
-  _GlowPainter(this.bg, this.glow);
-  final Color bg;
+  _GlowPainter(this.background, this.glow);
+  final Color background;
   final List<Color> glow;
 
   @override
   void paint(Canvas canvas, Size size) {
     final rect = Offset.zero & size;
-    canvas.drawRect(rect, Paint()..color = bg);
-    final m = math.max(size.width, size.height);
+    canvas.drawRect(rect, Paint()..color = background);
+    final longestSide = math.max(size.width, size.height);
+    // Each glow's centre, as fractions of the width and height, and its radius, as a fraction of
+    // the longest side.
     const spots = [(0.10, 0.02, 0.80), (0.96, 0.92, 0.75), (0.78, 0.12, 0.50)];
-    for (var i = 0; i < glow.length && i < spots.length; i++) {
-      final (x, y, r) = spots[i];
-      final centre = Offset(size.width * x, size.height * y);
+    for (var index = 0; index < glow.length && index < spots.length; index = index + 1) {
+      final (horizontalFraction, verticalFraction, radiusFraction) = spots[index];
+      final centre = Offset(size.width * horizontalFraction, size.height * verticalFraction);
       canvas.drawRect(
         rect,
-        Paint()..shader = RadialGradient(colors: [glow[i], glow[i].withValues(alpha: 0)]).createShader(Rect.fromCircle(center: centre, radius: m * r)),
+        Paint()
+          ..shader = RadialGradient(
+            colors: [glow[index], glow[index].withValues(alpha: 0)],
+          ).createShader(Rect.fromCircle(center: centre, radius: longestSide * radiusFraction)),
       );
     }
   }
 
   @override
-  bool shouldRepaint(_GlowPainter old) => old.bg != bg || !listEquals(old.glow, glow);
+  bool shouldRepaint(_GlowPainter oldPainter) {
+    return oldPainter.background != background || !listEquals(oldPainter.glow, glow);
+  }
 }
 
 /// The site's .glass-btn: a rounded square icon button, labelled for screen readers, its label on
@@ -406,31 +596,67 @@ class GlassButton extends StatelessWidget {
   final bool? active;
   final bool longPressLabel;
 
+  /// The button's outline. The systems' glass: a circle of glass on Tahoe, a rounded square
+  /// elsewhere, with the glass's fine edge. The other looks: a rounded square with a border.
+  ShapeBorder _shape(UwuColors colors) {
+    if (colors.native) {
+      if (colors.capsule) {
+        return CircleBorder(side: BorderSide(color: colors.rimShade));
+      }
+      return RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(colors.controlRadius + 2),
+        side: BorderSide(color: colors.rimShade),
+      );
+    }
+    return RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(14),
+      side: BorderSide(color: colors.border),
+    );
+  }
+
+  /// The icon's colour: the error colour for a dangerous action, else the brand's ink when
+  /// pressed and the page's ink when not.
+  Color _iconColour(UwuColors colors, bool pressed) {
+    if (danger) {
+      return colors.error;
+    }
+    if (pressed) {
+      return colors.onBrand;
+    }
+    return colors.ink;
+  }
+
   @override
   Widget build(BuildContext context) {
-    final c = UwuColors.of(context);
-    final on = active == true;
+    final colors = UwuColors.of(context);
+    final pressed = active == true;
+
+    TooltipTriggerMode? tooltipTrigger;
+    if (longPressLabel) {
+      tooltipTrigger = TooltipTriggerMode.longPress;
+    } else {
+      tooltipTrigger = null;
+    }
+
+    Color background;
+    if (pressed) {
+      background = colors.brandFill;
+    } else {
+      background = colors.surfaceStrong;
+    }
+
     return Tooltip(
       excludeFromSemantics: true,
       message: label,
-      triggerMode: longPressLabel ? TooltipTriggerMode.longPress : null,
+      triggerMode: tooltipTrigger,
       child: Semantics(
         button: true,
         toggled: active,
         label: label,
         excludeSemantics: true,
         child: Material(
-          color: on ? c.brandFill : c.surfaceStrong,
-          // The systems' glass: a circle of glass on Tahoe, a rounded square elsewhere, with the
-          // glass's fine edge.
-          shape: c.native
-              ? (c.capsule
-                    ? CircleBorder(side: BorderSide(color: c.rimShade))
-                    : RoundedRectangleBorder(borderRadius: BorderRadius.circular(c.controlRadius + 2), side: BorderSide(color: c.rimShade)))
-              : RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14),
-                  side: BorderSide(color: c.border),
-                ),
+          color: background,
+          shape: _shape(colors),
           clipBehavior: Clip.antiAlias,
           child: InkWell(
             mouseCursor: WidgetStateMouseCursor.clickable,
@@ -442,7 +668,7 @@ class GlassButton extends StatelessWidget {
                 child: AppIcon(
                   icon,
                   size: size * 0.45,
-                  color: danger ? c.error : (on ? c.onBrand : c.ink),
+                  color: _iconColour(colors, pressed),
                 ),
               ),
             ),
@@ -454,8 +680,8 @@ class GlassButton extends StatelessWidget {
 }
 
 /// A round icon button (the site's .icon-btn).
-class IconBtn extends StatelessWidget {
-  const IconBtn({
+class RoundIconButton extends StatelessWidget {
+  const RoundIconButton({
     super.key,
     required this.icon,
     required this.label,
@@ -474,9 +700,38 @@ class IconBtn extends StatelessWidget {
   /// A status light over the top right corner (the remote button's).
   final Color? badge;
 
+  /// Fluent's icon buttons are rounded squares; the other systems' glass ones round.
+  ShapeBorder _shape(UwuColors colors) {
+    if (colors.kind == GlassKind.fluent) {
+      return RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(colors.controlRadius),
+        side: BorderSide(color: colors.rimShade),
+      );
+    }
+    Color edgeColour;
+    if (colors.native) {
+      edgeColour = colors.rimShade;
+    } else {
+      edgeColour = colors.border;
+    }
+    return CircleBorder(side: BorderSide(color: edgeColour));
+  }
+
+  /// The icon's colour: muted when the button can't be pressed, else [color] or the page's ink.
+  Color _iconColour(UwuColors colors) {
+    if (onPressed == null) {
+      return colors.muted;
+    }
+    if (color == null) {
+      return colors.ink;
+    }
+    return color!;
+  }
+
+  /// The button itself, and, when there's a [badge], its status light pinned over the corner.
   @override
   Widget build(BuildContext context) {
-    final c = UwuColors.of(context);
+    final colors = UwuColors.of(context);
     final button = Tooltip(
       excludeFromSemantics: true,
       message: label,
@@ -486,11 +741,8 @@ class IconBtn extends StatelessWidget {
         label: label,
         excludeSemantics: true,
         child: Material(
-          color: c.surfaceStrong,
-          // Fluent's icon buttons are rounded squares; the other systems' glass ones round.
-          shape: c.kind == GlassKind.fluent
-              ? RoundedRectangleBorder(borderRadius: BorderRadius.circular(c.controlRadius), side: BorderSide(color: c.rimShade))
-              : CircleBorder(side: BorderSide(color: c.native ? c.rimShade : c.border)),
+          color: colors.surfaceStrong,
+          shape: _shape(colors),
           clipBehavior: Clip.antiAlias,
           child: InkWell(
             mouseCursor: WidgetStateMouseCursor.clickable,
@@ -502,7 +754,7 @@ class IconBtn extends StatelessWidget {
                 child: AppIcon(
                   icon,
                   size: size * 0.45,
-                  color: onPressed == null ? c.muted : (color ?? c.ink),
+                  color: _iconColour(colors),
                 ),
               ),
             ),
@@ -510,7 +762,9 @@ class IconBtn extends StatelessWidget {
         ),
       ),
     );
-    if (badge == null) return button;
+    if (badge == null) {
+      return button;
+    }
     return Stack(
       clipBehavior: Clip.none,
       children: [
@@ -525,7 +779,7 @@ class IconBtn extends StatelessWidget {
               decoration: BoxDecoration(
                 color: badge,
                 shape: BoxShape.circle,
-                border: Border.all(color: c.bg, width: 2),
+                border: Border.all(color: colors.bg, width: 2),
               ),
             ),
           ),
@@ -550,8 +804,10 @@ class KeyAction extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (!show) return child;
-    final c = UwuColors.of(context);
+    if (!show) {
+      return child;
+    }
+    final colors = UwuColors.of(context);
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -563,7 +819,7 @@ class KeyAction extends StatelessWidget {
             style: TextStyle(
               fontSize: 10,
               height: 1,
-              color: c.muted,
+              color: colors.muted,
               letterSpacing: 0.2,
             ),
           ),
@@ -581,20 +837,25 @@ class NoteBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final c = UwuColors.of(context);
-    final ink = error ? c.error : c.warn;
+    final colors = UwuColors.of(context);
+    Color ink;
+    if (error) {
+      ink = colors.error;
+    } else {
+      ink = colors.warn;
+    }
     return Semantics(
       liveRegion: error,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         decoration: BoxDecoration(
-          color: Color.alphaBlend(ink.withValues(alpha: 0.12), c.surfaceStrong),
+          color: Color.alphaBlend(ink.withValues(alpha: 0.12), colors.surfaceStrong),
           borderRadius: BorderRadius.circular(12),
           border: Border.all(color: ink.withValues(alpha: 0.5)),
         ),
         child: Text(
           text,
-          style: TextStyle(color: c.ink, fontSize: 13, height: 1.35),
+          style: TextStyle(color: colors.ink, fontSize: 13, height: 1.35),
         ),
       ),
     );
@@ -611,12 +872,12 @@ class StatusLine extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final c = UwuColors.of(context);
+    final colors = UwuColors.of(context);
     final colour = switch (light) {
-      'ok' => c.ok,
-      'warn' => c.warn,
-      'error' => c.error,
-      _ => c.busy,
+      'ok' => colors.ok,
+      'warn' => colors.warn,
+      'error' => colors.error,
+      _ => colors.busy,
     };
     return Semantics(
       liveRegion: true,
@@ -635,7 +896,7 @@ class StatusLine extends StatelessWidget {
           Expanded(
             child: Text(
               text,
-              style: TextStyle(color: c.ink, fontSize: 13.5, height: 1.35),
+              style: TextStyle(color: colors.ink, fontSize: 13.5, height: 1.35),
             ),
           ),
         ],
@@ -644,7 +905,6 @@ class StatusLine extends StatelessWidget {
   }
 }
 
-/// A form field's or section's label (the site's .modal-section-label).
 /// A text field's name for a screen reader, kept once it holds text (a hint goes when it's typed
 /// over, and with it the field's name).
 class Named extends StatelessWidget {
@@ -653,11 +913,14 @@ class Named extends StatelessWidget {
   final Widget child;
 
   @override
-  Widget build(BuildContext context) => MergeSemantics(
-    child: Semantics(label: name, child: child),
-  );
+  Widget build(BuildContext context) {
+    return MergeSemantics(
+      child: Semantics(label: name, child: child),
+    );
+  }
 }
 
+/// A form field's or section's label (the site's .modal-section-label).
 class FieldLabel extends StatelessWidget {
   const FieldLabel(this.text, {super.key, this.note, this.top = 12});
   final String text;
@@ -666,7 +929,7 @@ class FieldLabel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final c = UwuColors.of(context);
+    final colors = UwuColors.of(context);
     return Padding(
       padding: EdgeInsets.only(bottom: 6, top: top),
       child: Semantics(
@@ -678,14 +941,14 @@ class FieldLabel extends StatelessWidget {
                 text: text,
                 style: TextStyle(
                   fontSize: 12.5,
-                  color: c.muted,
+                  color: colors.muted,
                   fontWeight: FontWeight.w600,
                 ),
               ),
               if (note != null)
                 TextSpan(
                   text: ' $note',
-                  style: TextStyle(fontSize: 12, color: c.muted),
+                  style: TextStyle(fontSize: 12, color: colors.muted),
                 ),
             ],
           ),
@@ -703,12 +966,12 @@ class Note extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final c = UwuColors.of(context);
+    final colors = UwuColors.of(context);
     return Padding(
       padding: EdgeInsets.only(top: top),
       child: Text(
         text,
-        style: TextStyle(color: c.muted, fontSize: 12.5, height: 1.35),
+        style: TextStyle(color: colors.muted, fontSize: 12.5, height: 1.35),
       ),
     );
   }
@@ -730,17 +993,29 @@ class ToggleChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final c = UwuColors.of(context);
+    final colors = UwuColors.of(context);
+
+    // Pressed, it takes the brand's fill and ink; not pressed, the surface and the page's ink.
+    Color background;
+    Color foreground;
+    if (on) {
+      background = colors.brandFill;
+      foreground = colors.onBrand;
+    } else {
+      background = colors.surfaceStrong;
+      foreground = colors.ink;
+    }
+
     return Semantics(
       button: true,
       toggled: on,
       label: label,
       excludeSemantics: true,
       child: Material(
-        color: on ? c.brandFill : c.surfaceStrong,
+        color: background,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(12),
-          side: BorderSide(color: c.border),
+          side: BorderSide(color: colors.border),
         ),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
@@ -750,14 +1025,14 @@ class ToggleChip extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
             child: Row(
               children: [
-                AppIcon(icon, size: 16, color: on ? c.onBrand : c.ink),
+                AppIcon(icon, size: 16, color: foreground),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
                     label,
                     style: TextStyle(
                       fontSize: 13,
-                      color: on ? c.onBrand : c.ink,
+                      color: foreground,
                     ),
                   ),
                 ),
@@ -778,12 +1053,13 @@ class ToggleGrid extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
-      builder: (context, box) {
-        final w = (box.maxWidth - 8) / 2;
+      builder: (context, constraints) {
+        // Half the width, less half the 8 px gap between the two columns.
+        final columnWidth = (constraints.maxWidth - 8) / 2;
         return Wrap(
           spacing: 8,
           runSpacing: 8,
-          children: [for (final c in children) SizedBox(width: w, child: c)],
+          children: [for (final child in children) SizedBox(width: columnWidth, child: child)],
         );
       },
     );
@@ -798,7 +1074,7 @@ class ShortcutRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final c = UwuColors.of(context);
+    final colors = UwuColors.of(context);
     return Semantics(
       label: '$label: ${keys.join(' ')}',
       excludeSemantics: true,
@@ -809,19 +1085,19 @@ class ShortcutRow extends StatelessWidget {
             Expanded(
               child: Text(
                 label,
-                style: TextStyle(color: c.ink, fontSize: 13.5),
+                style: TextStyle(color: colors.ink, fontSize: 13.5),
               ),
             ),
-            for (final k in keys)
+            for (final keyName in keys)
               Container(
                 margin: const EdgeInsets.only(left: 6),
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
-                  color: c.surfaceStrong,
+                  color: colors.surfaceStrong,
                   borderRadius: BorderRadius.circular(6),
-                  border: Border.all(color: c.border),
+                  border: Border.all(color: colors.border),
                 ),
-                child: Text(k, style: TextStyle(color: c.ink, fontSize: 12)),
+                child: Text(keyName, style: TextStyle(color: colors.ink, fontSize: 12)),
               ),
           ],
         ),

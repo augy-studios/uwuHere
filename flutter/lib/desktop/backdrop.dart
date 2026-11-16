@@ -21,6 +21,7 @@ import 'runner.dart';
 class Backdrop {
   Backdrop._();
 
+  /// The last request sent to the runner ('kind:dark'), so the same one isn't sent twice.
   static String? _asked;
 
   static void start() {
@@ -28,35 +29,39 @@ class Backdrop {
     // window_manager's setTitleBarStyle (as the window first opens, after the splash) and full
     // screen put the window's frame back to its own, which takes Mica's area away: the pane stayed
     // black until the look was changed. So it's asked for again after each.
-    Desktop.onShown.add(_again);
-    Desktop.fullScreen.addListener(_again);
+    Desktop.onShown.add(_applyAgain);
+    Desktop.fullScreen.addListener(_applyAgain);
     _apply();
   }
 
-  static void _again() {
+  static void _applyAgain() {
     _asked = null;
     _apply();
   }
 
-  static String _kind(ThemeController t) {
-    if (!t.isNative) return 'none';
-    return switch (t.nativeStyle) {
-      NativeStyle.fluent => 'mica',
-      NativeStyle.tahoe => 'vibrancy',
-      NativeStyle.frosted => 'blur',
-    };
+  /// The material the current look asks for: 'mica', 'vibrancy', 'blur', or 'none'.
+  static String _kindFor(ThemeController theme) {
+    if (!theme.isNative) return 'none';
+    switch (theme.nativeStyle) {
+      case NativeStyle.fluent:
+        return 'mica';
+      case NativeStyle.tahoe:
+        return 'vibrancy';
+      case NativeStyle.frosted:
+        return 'blur';
+    }
   }
 
   static Future<void> _apply() async {
-    final t = ThemeController.I;
-    final kind = _kind(t);
-    final dark = t.brightness == Brightness.dark;
-    final ask = '$kind:$dark';
-    if (ask == _asked) return;
-    _asked = ask;
-    final shown = await Runner.setBackdrop(kind, dark: dark);
+    final theme = ThemeController.I;
+    final kind = _kindFor(theme);
+    final isDark = theme.brightness == Brightness.dark;
+    final request = '$kind:$isDark';
+    if (request == _asked) return;
+    _asked = request;
+    final shown = await Runner.setBackdrop(kind, dark: isDark);
     // A later change has asked since: its answer stands.
-    if (_asked != ask) return;
-    t.setNativeBackdrop(kind != 'none' && shown);
+    if (_asked != request) return;
+    theme.setNativeBackdrop(kind != 'none' && shown);
   }
 }

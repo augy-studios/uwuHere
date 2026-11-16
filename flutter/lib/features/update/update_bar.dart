@@ -35,18 +35,47 @@ import 'release_notes.dart';
 const _releasesKey = 'uwuhere.releaseAlerts';
 const playListing = 'https://play.google.com/store/apps/details?id=org.uwuapps.here';
 
-/// Whether version a comes after version b, number by number: 1.10.0 after 1.9.0. The same as
-/// newer() in main-site/api/app-release.js.
-bool newerVersion(String a, String b) {
-  List<int> parts(String v) => v.split('.').map((n) => int.tryParse(n.replaceAll(RegExp(r'\D'), '')) ?? 0).toList();
-  final x = parts(a), y = parts(b);
-  for (var i = 0; i < x.length || i < y.length; i++) {
-    final d = (i < x.length ? x[i] : 0) - (i < y.length ? y[i] : 0);
-    if (d != 0) return d > 0;
+/// Whether `version` comes after `otherVersion`, number by number: 1.10.0 after 1.9.0. The same
+/// as newer() in main-site/api/app-release.js.
+bool newerVersion(String version, String otherVersion) {
+  final versionNumbers = _versionNumbers(version);
+  final otherNumbers = _versionNumbers(otherVersion);
+  for (var index = 0; index < versionNumbers.length || index < otherNumbers.length; index = index + 1) {
+    // A version with fewer parts counts its missing parts as 0: 1.2 is the same as 1.2.0.
+    var versionNumber = 0;
+    if (index < versionNumbers.length) {
+      versionNumber = versionNumbers[index];
+    }
+    var otherNumber = 0;
+    if (index < otherNumbers.length) {
+      otherNumber = otherNumbers[index];
+    }
+    final difference = versionNumber - otherNumber;
+    if (difference != 0) {
+      return difference > 0;
+    }
   }
   return false;
 }
 
+/// A version's numbers, one for each part between the dots, with anything that isn't a digit
+/// taken out first ("0-beta" is 0), and 0 for a part with no digits at all.
+List<int> _versionNumbers(String version) {
+  final numbers = <int>[];
+  for (final part in version.split('.')) {
+    final parsed = int.tryParse(part.replaceAll(RegExp(r'\D'), ''));
+    if (parsed == null) {
+      numbers.add(0);
+    } else {
+      numbers.add(parsed);
+    }
+  }
+  return numbers;
+}
+
+/// Everything the updater knows and does: the site's list of releases, whether a newer one is
+/// out, downloading and installing it, and the "New versions of the app" notifications switch.
+/// One for the whole app, which the bar and the Updates page both listen to.
 class AndroidUpdates extends ChangeNotifier with WidgetsBindingObserver {
   AndroidUpdates._();
   static final AndroidUpdates I = AndroidUpdates._();
@@ -67,64 +96,122 @@ class AndroidUpdates extends ChangeNotifier with WidgetsBindingObserver {
 
   bool _started = false;
 
-  String get mine => Native.version ?? Env.version;
+  /// The version of this copy of the app, as the native side reports it, or else as it was built.
+  String get installedVersion {
+    final nativeVersion = Native.version;
+    if (nativeVersion != null) {
+      return nativeVersion;
+    }
+    return Env.version;
+  }
 
   /// The newest release, when it's newer than this copy.
-  Map<String, dynamic>? get newer {
-    final l = latest;
-    if (l == null || l['version'] is! String) return null;
-    return newerVersion(l['version'] as String, mine) ? l : null;
+  Map<String, dynamic>? get newerRelease {
+    final newest = latest;
+    if (newest == null || newest['version'] is! String) {
+      return null;
+    }
+    if (newerVersion(newest['version'] as String, installedVersion)) {
+      return newest;
+    }
+    return null;
   }
 
   /// The Play build: Play updates it, so no updater of its own.
-  bool get play => isPlayBuild || Native.info?['play'] == true;
+  bool get updatedByPlay {
+    if (isPlayBuild) {
+      return true;
+    }
+    final info = Native.info;
+    if (info == null) {
+      return false;
+    }
+    return info['play'] == true;
+  }
 
-  bool get offered => newer != null && !dismissed && !play;
+  bool get offered {
+    return newerRelease != null && !dismissed && !updatedByPlay;
+  }
 
-  List<Map<String, dynamic>> get history => [
-    for (final h in (latest?['history'] as List? ?? const []))
-      if (h is Map) Map<String, dynamic>.from(h),
-  ];
+  /// Every release the site listed, newest first, each as a map (anything else in the list skipped).
+  List<Map<String, dynamic>> get history {
+    List<dynamic> everyRelease = const [];
+    final newest = latest;
+    if (newest != null) {
+      final listed = newest['history'] as List?;
+      if (listed != null) {
+        everyRelease = listed;
+      }
+    }
+    return [
+      for (final release in everyRelease)
+        if (release is Map) Map<String, dynamic>.from(release),
+    ];
+  }
 
   void start() {
-    if (_started || !Env.android) return;
+    if (_started || !Env.android) {
+      return;
+    }
     _started = true;
     WidgetsBinding.instance.addObserver(this);
     notices = Store.I.get(_releasesKey) == '1';
     readNotices();
     // The notification "x.y.z is out", tapped: this page.
-    Native.on('App', 'openUpdates', (_) => openUpdates());
+    Native.on('App', 'openUpdates', (_) {
+      openUpdates();
+    });
     check();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state != AppLifecycleState.resumed) return;
-    final at = _checkedAt;
-    if (at == null || DateTime.now().difference(at) > const Duration(hours: 1)) check();
+    if (state != AppLifecycleState.resumed) {
+      return;
+    }
+    final lastChecked = _checkedAt;
+    if (lastChecked == null || DateTime.now().difference(lastChecked) > const Duration(hours: 1)) {
+      check();
+    }
   }
 
   /// Whether the check running now was asked for (the bar says so), rather than the quiet one.
   bool asked = false;
 
-  /// `fresh` asks past the site's cache, for a release published a moment ago.
+  /// Asks the site for its releases. `fresh` asks past the site's cache, for a release published
+  /// a moment ago; `asked` means someone asked, so the bar shows the check and a toast says when
+  /// there's nothing newer.
   Future<void> check({bool fresh = false, bool asked = false}) async {
     _checkedAt = DateTime.now();
     loading = true;
     this.asked = asked;
     notifyListeners();
     try {
-      final uri = Api.uri('/app-release${fresh ? '?v=${DateTime.now().millisecondsSinceEpoch}' : ''}');
-      final res = await Api.client.get(uri).timeout(const Duration(seconds: 20));
-      if (res.statusCode != 200) throw StateError('HTTP ${res.statusCode}');
-      final data = jsonDecode(res.body);
-      if (data is Map) latest = Map<String, dynamic>.from(data);
+      var path = '/app-release';
+      if (fresh) {
+        path = '$path?v=${DateTime.now().millisecondsSinceEpoch}';
+      }
+      final uri = Api.uri(path);
+      final response = await Api.client.get(uri).timeout(const Duration(seconds: 20));
+      if (response.statusCode != 200) {
+        throw StateError('HTTP ${response.statusCode}');
+      }
+      final data = jsonDecode(response.body);
+      if (data is Map) {
+        latest = Map<String, dynamic>.from(data);
+      }
       failed = false;
     } catch (_) {
       failed = latest == null;
     }
     loading = false;
-    if (this.asked && newer == null && !failed) AppNav.toast('You have the newest version, ${mine.isEmpty ? 'already' : mine}.');
+    if (this.asked && newerRelease == null && !failed) {
+      var versionText = installedVersion;
+      if (versionText.isEmpty) {
+        versionText = 'already';
+      }
+      AppNav.toast('You have the newest version, $versionText.');
+    }
     this.asked = false;
     notifyListeners();
   }
@@ -134,32 +221,49 @@ class AndroidUpdates extends ChangeNotifier with WidgetsBindingObserver {
     notifyListeners();
   }
 
+  /// Downloads the newer release's APK to the temporary folder, showing its progress, checks it
+  /// against the SHA-256 GitHub gave, and hands it to Android's installer. Says what went wrong
+  /// in `error` when it couldn't.
   Future<void> install() async {
-    final r = newer;
-    if (r == null || progress != null) return;
+    final release = newerRelease;
+    if (release == null || progress != null) {
+      return;
+    }
     error = null;
     progress = 0;
     notifyListeners();
     try {
-      final dir = await getTemporaryDirectory();
-      final file = File('${dir.path}${Platform.pathSeparator}uwuhere-${r['version']}.apk');
-      final res = await Api.client.send(http.Request('GET', Uri.parse('${r['apk']}')));
-      if (res.statusCode != 200) throw StateError('HTTP ${res.statusCode}');
-      final total = (r['size'] as num?)?.toInt() ?? res.contentLength ?? 0;
+      final directory = await getTemporaryDirectory();
+      final file = File('${directory.path}${Platform.pathSeparator}uwuhere-${release['version']}.apk');
+      final response = await Api.client.send(http.Request('GET', Uri.parse('${release['apk']}')));
+      if (response.statusCode != 200) {
+        throw StateError('HTTP ${response.statusCode}');
+      }
+      // The size the site gave, or else the size the download says it is, or else unknown (0).
+      var totalBytes = 0;
+      final listedSize = release['size'] as num?;
+      if (listedSize != null) {
+        totalBytes = listedSize.toInt();
+      } else {
+        final contentLength = response.contentLength;
+        if (contentLength != null) {
+          totalBytes = contentLength;
+        }
+      }
       final sink = file.openWrite();
-      var got = 0;
-      await for (final chunk in res.stream) {
+      var receivedBytes = 0;
+      await for (final chunk in response.stream) {
         sink.add(chunk);
-        got += chunk.length;
-        if (total > 0) {
-          progress = got / total;
+        receivedBytes = receivedBytes + chunk.length;
+        if (totalBytes > 0) {
+          progress = receivedBytes / totalBytes;
           notifyListeners();
         }
       }
       await sink.close();
-      final sum = (await sha256.bind(file.openRead()).first).toString();
-      final expected = r['sha256'];
-      if (expected is String && expected.isNotEmpty && expected.toLowerCase() != sum) {
+      final checksum = (await sha256.bind(file.openRead()).first).toString();
+      final expected = release['sha256'];
+      if (expected is String && expected.isNotEmpty && expected.toLowerCase() != checksum) {
         await file.delete();
         throw StateError('checksum');
       }
@@ -167,13 +271,15 @@ class AndroidUpdates extends ChangeNotifier with WidgetsBindingObserver {
       notifyListeners();
       await Native.call('App', 'installApk', {'path': file.path});
       progress = null;
-    } catch (e) {
+    } catch (exception) {
       progress = null;
-      error = e is StateError && e.message == 'checksum'
-          ? 'The download didn’t match GitHub’s checksum, so it wasn’t installed. Try again.'
-          : (e is NativeError && e.code == 'permission'
-                ? 'Allow uwuHere to install apps, then press Update again.'
-                : 'Couldn’t download the update. Check your connection and try again.');
+      if (exception is StateError && exception.message == 'checksum') {
+        error = 'The download didn’t match GitHub’s checksum, so it wasn’t installed. Try again.';
+      } else if (exception is NativeError && exception.code == 'permission') {
+        error = 'Allow uwuHere to install apps, then press Update again.';
+      } else {
+        error = 'Couldn’t download the update. Check your connection and try again.';
+      }
     }
     notifyListeners();
   }
@@ -181,32 +287,46 @@ class AndroidUpdates extends ChangeNotifier with WidgetsBindingObserver {
   /// The Notifications sheet's switch and this one are the same topic: read where it's kept, as
   /// the app starts, each time the Updates page opens, and after the sheet changes it.
   Future<void> readNotices() async {
-    final t = await Native.tryCall('Here', 'topics');
-    if (t == null || notices == null) return;
-    notices = t['releases'] == true;
-    Store.I.put(_releasesKey, notices! ? '1' : '0');
+    final topics = await Native.tryCall('Here', 'topics');
+    if (topics == null || notices == null) {
+      return;
+    }
+    notices = topics['releases'] == true;
+    var storedValue = '0';
+    if (notices!) {
+      storedValue = '1';
+    }
+    Store.I.put(_releasesKey, storedValue);
     notifyListeners();
   }
 
   /// Joins or leaves the release topic (Firebase), asking for notifications first.
   Future<void> setNotices(bool on) async {
-    final was = notices;
+    final previous = notices;
     notices = null;
     notifyListeners();
     try {
       await Native.call('App', 'setReleases', {'on': on});
       notices = on;
-      Store.I.put(_releasesKey, on ? '1' : '0');
-      AppNav.toast(on ? 'You’ll get a notification the moment a new version is out.' : 'No more notifications of new versions.');
-    } on NativeError catch (e) {
-      notices = was;
-      AppNav.toast(
-        e.code == 'permission'
-            ? 'Notifications are off for uwuHere. Turn them on in Android’s settings, then try again.'
-            : 'Couldn’t reach Firebase. Check your connection and try again.',
-        error: true,
-      );
-      if (e.code == 'permission') Native.tryCall('App', 'openSettings', {'page': 'notifications'});
+      if (on) {
+        Store.I.put(_releasesKey, '1');
+        AppNav.toast('You’ll get a notification the moment a new version is out.');
+      } else {
+        Store.I.put(_releasesKey, '0');
+        AppNav.toast('No more notifications of new versions.');
+      }
+    } on NativeError catch (nativeError) {
+      notices = previous;
+      String message;
+      if (nativeError.code == 'permission') {
+        message = 'Notifications are off for uwuHere. Turn them on in Android’s settings, then try again.';
+      } else {
+        message = 'Couldn’t reach Firebase. Check your connection and try again.';
+      }
+      AppNav.toast(message, error: true);
+      if (nativeError.code == 'permission') {
+        Native.tryCall('App', 'openSettings', {'page': 'notifications'});
+      }
     }
     notifyListeners();
   }
@@ -223,18 +343,28 @@ class UpdateBar extends StatelessWidget {
     return ListenableBuilder(
       listenable: AndroidUpdates.I,
       builder: (context, _) {
-        final u = AndroidUpdates.I;
-        final c = UwuColors.of(context);
-        Widget bar(Widget child) => Material(
-          color: c.brandFill,
-          child: SafeArea(bottom: false, child: Padding(padding: const EdgeInsets.fromLTRB(16, 8, 8, 8), child: child)),
-        );
-        if (u.progress != null) {
-          final pct = ((u.progress ?? 0) * 100).round();
-          return bar(
+        final updates = AndroidUpdates.I;
+        final colors = UwuColors.of(context);
+        // The bar's own look, around whichever of the three it's showing.
+        Widget wrapInBar(Widget child) {
+          return Material(
+            color: colors.brandFill,
+            child: SafeArea(bottom: false, child: Padding(padding: const EdgeInsets.fromLTRB(16, 8, 8, 8), child: child)),
+          );
+        }
+
+        final progress = updates.progress;
+        if (progress != null) {
+          final percent = (progress * 100).round();
+          var targetVersion = 'the new version';
+          final newer = updates.newerRelease;
+          if (newer != null && newer['version'] != null) {
+            targetVersion = '${newer['version']}';
+          }
+          return wrapInBar(
             Semantics(
               liveRegion: true,
-              label: 'Updating to ${u.newer?['version'] ?? 'the new version'}, $pct percent',
+              label: 'Updating to $targetVersion, $percent percent',
               excludeSemantics: true,
               child: Padding(
                 padding: const EdgeInsets.only(right: 8),
@@ -242,17 +372,17 @@ class UpdateBar extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text('Updating to ${u.newer?['version'] ?? 'the new version'}… $pct%', style: TextStyle(color: c.onBrand, fontSize: 14)),
+                    Text('Updating to $targetVersion… $percent%', style: TextStyle(color: colors.onBrand, fontSize: 14)),
                     const SizedBox(height: 6),
-                    WavyProgress(value: u.progress, label: 'Updating'),
+                    WavyProgress(value: progress, label: 'Updating'),
                   ],
                 ),
               ),
             ),
           );
         }
-        if (u.asked && u.loading) {
-          return bar(
+        if (updates.asked && updates.loading) {
+          return wrapInBar(
             Semantics(
               liveRegion: true,
               label: 'Checking for updates',
@@ -263,7 +393,7 @@ class UpdateBar extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text('Checking for updates…', style: TextStyle(color: c.onBrand, fontSize: 14)),
+                    Text('Checking for updates…', style: TextStyle(color: colors.onBrand, fontSize: 14)),
                     const SizedBox(height: 6),
                     WavyProgress(label: 'Checking for updates'),
                   ],
@@ -272,24 +402,26 @@ class UpdateBar extends StatelessWidget {
             ),
           );
         }
-        if (!u.offered) return const SizedBox.shrink();
-        return bar(
+        if (!updates.offered) {
+          return const SizedBox.shrink();
+        }
+        return wrapInBar(
           Row(
             children: [
               Expanded(
                 child: Semantics(
                   liveRegion: true,
-                  child: Text('uwuHere ${u.newer!['version']} is out.', style: TextStyle(color: c.onBrand, fontSize: 14)),
+                  child: Text('uwuHere ${updates.newerRelease!['version']} is out.', style: TextStyle(color: colors.onBrand, fontSize: 14)),
                 ),
               ),
               FilledButton(
-                style: FilledButton.styleFrom(backgroundColor: c.surfaceStrong, foregroundColor: c.ink),
+                style: FilledButton.styleFrom(backgroundColor: colors.surfaceStrong, foregroundColor: colors.ink),
                 onPressed: openUpdates,
                 child: const Text('Update'),
               ),
               TextButton(
-                onPressed: u.dismiss,
-                style: TextButton.styleFrom(foregroundColor: c.onBrand),
+                onPressed: updates.dismiss,
+                style: TextButton.styleFrom(foregroundColor: colors.onBrand),
                 child: const Text('Not now'),
               ),
             ],
@@ -307,16 +439,29 @@ ColorScheme? darkDynamicScheme;
 
 /// The Updates page. `check` is the Edge Tray's Check for updates: the bar says it's looking.
 Future<void> openUpdates({bool check = false}) async {
-  final nav = AppNav.navigatorKey.currentState;
-  if (nav == null) return;
+  final navigator = AppNav.navigatorKey.currentState;
+  if (navigator == null) {
+    return;
+  }
   AndroidUpdates.I.check(fresh: true, asked: check);
   AndroidUpdates.I.readNotices();
-  await nav.push(
+  await navigator.push(
     MaterialPageRoute<void>(
-      builder: (_) => const UpdatesPage(),
+      builder: (_) {
+        return const UpdatesPage();
+      },
       settings: const RouteSettings(name: 'updates'),
     ),
   );
+}
+
+/// A text theme's style in another colour (and weight, when one's given), or no style when the
+/// theme has none for it.
+TextStyle? _styleWith(TextStyle? style, {required Color color, FontWeight? fontWeight}) {
+  if (style == null) {
+    return null;
+  }
+  return style.copyWith(color: color, fontWeight: fontWeight);
 }
 
 /// The Updates page: this version, the newest and its Update button, the release notifications
@@ -327,8 +472,13 @@ class UpdatesPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final brightness = ThemeController.I.brightness;
-    final dyn = brightness == Brightness.dark ? darkDynamicScheme : lightDynamicScheme;
-    final theme = buildTheme(look: lookMaterial, brightness: brightness, brand: ThemeController.I.colorTheme.color, dynamicScheme: dyn);
+    ColorScheme? dynamicScheme;
+    if (brightness == Brightness.dark) {
+      dynamicScheme = darkDynamicScheme;
+    } else {
+      dynamicScheme = lightDynamicScheme;
+    }
+    final theme = buildTheme(look: lookMaterial, brightness: brightness, brand: ThemeController.I.colorTheme.color, dynamicScheme: dynamicScheme);
     return Theme(data: theme, child: const _UpdatesBody());
   }
 }
@@ -336,29 +486,52 @@ class UpdatesPage extends StatelessWidget {
 class _UpdatesBody extends StatelessWidget {
   const _UpdatesBody();
 
+  /// The page itself: a large title bar, the status card, the notifications switch (where the
+  /// APK has Firebase), then every version on a timeline. Pull down to look again.
   @override
   Widget build(BuildContext context) {
-    final s = Theme.of(context).colorScheme;
-    final t = Theme.of(context).textTheme;
+    final scheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
     return ListenableBuilder(
       listenable: AndroidUpdates.I,
       builder: (context, _) {
-        final u = AndroidUpdates.I;
-        final newer = u.newer;
-        final history = u.history;
+        final updates = AndroidUpdates.I;
+        final newer = updates.newerRelease;
+        final history = updates.history;
+
+        // The switch shows off while its state is unknown, and can't be pressed while it changes.
+        final notices = updates.notices;
+        var switchValue = false;
+        ValueChanged<bool>? onSwitchChanged;
+        if (notices != null) {
+          switchValue = notices;
+          onSwitchChanged = updates.setNotices;
+        }
+
+        String emptyMessage;
+        if (updates.failed) {
+          emptyMessage = 'Couldn’t load the versions. Pull down to try again.';
+        } else {
+          emptyMessage = 'No versions published yet.';
+        }
+
         return Scaffold(
-          backgroundColor: s.surface,
+          backgroundColor: scheme.surface,
           body: RefreshIndicator(
-            onRefresh: () => u.check(fresh: true),
+            onRefresh: () {
+              return updates.check(fresh: true);
+            },
             child: CustomScrollView(
               slivers: [
                 SliverAppBar.large(
-                  backgroundColor: s.surface,
-                  surfaceTintColor: s.surfaceTint,
+                  backgroundColor: scheme.surface,
+                  surfaceTintColor: scheme.surfaceTint,
                   leading: IconButton(
                     tooltip: 'Back',
-                    onPressed: () => Navigator.pop(context),
-                    icon: AppIcon('arrow-left', color: s.onSurface),
+                    onPressed: () {
+                      Navigator.pop(context);
+                    },
+                    icon: AppIcon('arrow-left', color: scheme.onSurface),
                   ),
                   title: const Text('Updates'),
                 ),
@@ -366,38 +539,38 @@ class _UpdatesBody extends StatelessWidget {
                   padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
                   sliver: SliverList.list(
                     children: [
-                      _statusCard(context, u, newer),
+                      _statusCard(context, updates, newer),
                       if (Native.has('push')) ...[
                         const SizedBox(height: 12),
                         Card.filled(
-                          color: s.surfaceContainer,
+                          color: scheme.surfaceContainer,
                           child: SwitchListTile(
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                            secondary: AppIcon('bell', color: s.onSurfaceVariant),
+                            secondary: AppIcon('bell', color: scheme.onSurfaceVariant),
                             title: const Text('New versions of the app'),
                             subtitle: const Text('A notification the moment a new version is out, even with the app closed.'),
-                            value: u.notices ?? false,
-                            onChanged: u.notices == null ? null : u.setNotices,
+                            value: switchValue,
+                            onChanged: onSwitchChanged,
                           ),
                         ),
                       ],
                       const SizedBox(height: 24),
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 4),
-                        child: Text('Every version', style: t.titleMedium?.copyWith(color: s.primary)),
+                        child: Text('Every version', style: _styleWith(textTheme.titleMedium, color: scheme.primary)),
                       ),
                       const SizedBox(height: 8),
-                      if (history.isEmpty && u.loading)
+                      if (history.isEmpty && updates.loading)
                         const Padding(
                           padding: EdgeInsets.symmetric(horizontal: 4, vertical: 24),
                           child: WavyProgress(label: 'Loading the versions'),
                         ),
-                      if (history.isEmpty && !u.loading)
+                      if (history.isEmpty && !updates.loading)
                         Padding(
                           padding: const EdgeInsets.all(16),
                           child: Text(
-                            u.failed ? 'Couldn’t load the versions. Pull down to try again.' : 'No versions published yet.',
-                            style: t.bodyMedium?.copyWith(color: s.onSurfaceVariant),
+                            emptyMessage,
+                            style: _styleWith(textTheme.bodyMedium, color: scheme.onSurfaceVariant),
                           ),
                         ),
                     ],
@@ -406,7 +579,7 @@ class _UpdatesBody extends StatelessWidget {
                 SliverPadding(
                   padding: const EdgeInsets.fromLTRB(16, 0, 16, 32),
                   sliver: SliverToBoxAdapter(
-                    child: _Timeline(history: history, mine: u.mine),
+                    child: _Timeline(history: history, installedVersion: updates.installedVersion),
                   ),
                 ),
               ],
@@ -417,12 +590,38 @@ class _UpdatesBody extends StatelessWidget {
     );
   }
 
-  Widget _statusCard(BuildContext context, AndroidUpdates u, Map<String, dynamic>? newer) {
-    final s = Theme.of(context).colorScheme;
-    final t = Theme.of(context).textTheme;
-    final up = newer == null;
+  /// The card at the top: up to date (with Check for updates), or the newer version that's out
+  /// with its Update button, its download's progress, or what went wrong.
+  Widget _statusCard(BuildContext context, AndroidUpdates updates, Map<String, dynamic>? newer) {
+    final scheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+    final upToDate = newer == null;
+    final progress = updates.progress;
+    final error = updates.error;
+
+    Color cardColor;
+    String headline;
+    Color headlineColor;
+    Color versionColor;
+    var updateLabel = 'Update';
+    if (upToDate) {
+      cardColor = scheme.surfaceContainerHigh;
+      headline = 'You’re up to date';
+      headlineColor = scheme.onSurface;
+      versionColor = scheme.onSurfaceVariant;
+    } else {
+      cardColor = scheme.primaryContainer;
+      headline = 'uwuHere ${newer['version']} is out';
+      headlineColor = scheme.onPrimaryContainer;
+      versionColor = scheme.onPrimaryContainer;
+      final sizeText = _sizeText(newer['size']);
+      if (sizeText.isNotEmpty) {
+        updateLabel = 'Update ($sizeText)';
+      }
+    }
+
     return Card.filled(
-      color: up ? s.surfaceContainerHigh : s.primaryContainer,
+      color: cardColor,
       child: Padding(
         padding: const EdgeInsets.all(20),
         child: Column(
@@ -440,49 +639,53 @@ class _UpdatesBody extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        up ? 'You’re up to date' : 'uwuHere ${newer['version']} is out',
-                        style: t.titleLarge?.copyWith(color: up ? s.onSurface : s.onPrimaryContainer),
+                        headline,
+                        style: _styleWith(textTheme.titleLarge, color: headlineColor),
                       ),
                       const SizedBox(height: 2),
-                      Text('This is version ${u.mine}.', style: t.bodyMedium?.copyWith(color: up ? s.onSurfaceVariant : s.onPrimaryContainer)),
+                      Text('This is version ${updates.installedVersion}.', style: _styleWith(textTheme.bodyMedium, color: versionColor)),
                     ],
                   ),
                 ),
               ],
             ),
-            if (!up) ...[
+            if (!upToDate) ...[
               const SizedBox(height: 16),
-              if (u.progress != null) ...[
-                WavyProgress(value: u.progress, label: 'Downloading'),
+              if (progress != null) ...[
+                WavyProgress(value: progress, label: 'Downloading'),
                 const SizedBox(height: 8),
-                Text('Downloading… ${((u.progress ?? 0) * 100).round()}%', style: t.bodySmall?.copyWith(color: s.onPrimaryContainer)),
-              ] else if (u.play)
+                Text('Downloading… ${(progress * 100).round()}%', style: _styleWith(textTheme.bodySmall, color: scheme.onPrimaryContainer)),
+              ] else if (updates.updatedByPlay)
                 FilledButton.icon(
-                  onPressed: () => launchUrl(Uri.parse(playListing), mode: LaunchMode.externalApplication),
-                  icon: AppIcon('appUpdate', size: 18, color: s.onPrimary),
+                  onPressed: () {
+                    launchUrl(Uri.parse(playListing), mode: LaunchMode.externalApplication);
+                  },
+                  icon: AppIcon('appUpdate', size: 18, color: scheme.onPrimary),
                   label: const Text('Update on Google Play'),
                 )
               else
                 FilledButton.icon(
-                  onPressed: u.install,
-                  icon: AppIcon('appUpdate', size: 18, color: s.onPrimary),
-                  label: Text(_size(newer['size']).isEmpty ? 'Update' : 'Update (${_size(newer['size'])})'),
+                  onPressed: updates.install,
+                  icon: AppIcon('appUpdate', size: 18, color: scheme.onPrimary),
+                  label: Text(updateLabel),
                 ),
-              if (u.error != null)
+              if (error != null)
                 Padding(
                   padding: const EdgeInsets.only(top: 10),
-                  child: Text(u.error!, style: TextStyle(color: s.error)),
+                  child: Text(error, style: TextStyle(color: scheme.error)),
                 ),
             ] else ...[
               const SizedBox(height: 12),
-              if (u.loading) ...[
+              if (updates.loading) ...[
                 const WavyProgress(label: 'Checking for updates'),
                 const SizedBox(height: 8),
-                Text('Checking for updates…', style: t.bodySmall?.copyWith(color: s.onSurfaceVariant)),
+                Text('Checking for updates…', style: _styleWith(textTheme.bodySmall, color: scheme.onSurfaceVariant)),
               ] else
                 OutlinedButton.icon(
-                  onPressed: () => u.check(fresh: true),
-                  icon: AppIcon('refresh', size: 16, color: s.primary),
+                  onPressed: () {
+                    updates.check(fresh: true);
+                  },
+                  icon: AppIcon('refresh', size: 16, color: scheme.primary),
                   label: const Text('Check for updates'),
                 ),
             ],
@@ -492,36 +695,55 @@ class _UpdatesBody extends StatelessWidget {
     );
   }
 
-  static String _size(Object? bytes) => bytes is num && bytes > 0 ? '${(bytes / 1e6).toStringAsFixed(1)} MB' : '';
+  /// A download's size in megabytes, "12.3 MB", or nothing when the size isn't known.
+  static String _sizeText(Object? bytes) {
+    if (bytes is num && bytes > 0) {
+      return '${(bytes / 1e6).toStringAsFixed(1)} MB';
+    }
+    return '';
+  }
 }
 
 /// Every release on a timeline, newest first, as sgbus-timings' updater has them: the ones newer
 /// than this copy marked New, this one Installed, and "Earlier releases" before the rest. The one
 /// you'd get opens by itself, or this one when there's nothing newer.
 class _Timeline extends StatelessWidget {
-  const _Timeline({required this.history, required this.mine});
+  const _Timeline({required this.history, required this.installedVersion});
   final List<Map<String, dynamic>> history;
-  final String mine;
+  final String installedVersion;
 
   @override
   Widget build(BuildContext context) {
-    var open = -1;
-    if (history.isNotEmpty && newerVersion('${history.first['version']}', mine)) {
-      open = 0;
+    // Which release starts open: the newest when it's newer than this copy, otherwise the first
+    // that isn't newer (this one, usually).
+    var openIndex = -1;
+    if (history.isNotEmpty && newerVersion('${history.first['version']}', installedVersion)) {
+      openIndex = 0;
     } else {
-      open = history.indexWhere((r) => !newerVersion('${r['version']}', mine));
+      openIndex = history.indexWhere((release) {
+        return !newerVersion('${release['version']}', installedVersion);
+      });
     }
     final children = <Widget>[];
     var labelled = false;
-    for (var i = 0; i < history.length; i++) {
-      final v = '${history[i]['version']}';
-      final isNew = newerVersion(v, mine);
-      final installed = v == mine;
+    for (var index = 0; index < history.length; index = index + 1) {
+      final version = '${history[index]['version']}';
+      final isNew = newerVersion(version, installedVersion);
+      final installed = version == installedVersion;
       if (!isNew && !installed && !labelled) {
         labelled = true;
         children.add(const _EarlierLabel());
       }
-      children.add(_Release(key: ValueKey(v), release: history[i], isNew: isNew, installed: installed, openAtFirst: i == open, last: i == history.length - 1));
+      children.add(
+        _Release(
+          key: ValueKey(version),
+          release: history[index],
+          isNew: isNew,
+          installed: installed,
+          openAtFirst: index == openIndex,
+          isLast: index == history.length - 1,
+        ),
+      );
     }
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: children);
   }
@@ -532,20 +754,20 @@ class _EarlierLabel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final s = Theme.of(context).colorScheme;
-    final t = Theme.of(context).textTheme;
+    final scheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
     return IntrinsicHeight(
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           SizedBox(
             width: 24,
-            child: Center(child: Container(width: 2, color: s.outlineVariant)),
+            child: Center(child: Container(width: 2, color: scheme.outlineVariant)),
           ),
           Expanded(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(12, 4, 0, 24),
-              child: Text('Earlier releases', style: t.titleSmall?.copyWith(color: s.onSurfaceVariant)),
+              child: Text('Earlier releases', style: _styleWith(textTheme.titleSmall, color: scheme.onSurfaceVariant)),
             ),
           ),
         ],
@@ -555,15 +777,17 @@ class _EarlierLabel extends StatelessWidget {
 }
 
 class _Release extends StatefulWidget {
-  const _Release({super.key, required this.release, required this.isNew, required this.installed, required this.openAtFirst, required this.last});
+  const _Release({super.key, required this.release, required this.isNew, required this.installed, required this.openAtFirst, required this.isLast});
   final Map<String, dynamic> release;
   final bool isNew;
   final bool installed;
   final bool openAtFirst;
-  final bool last;
+  final bool isLast;
 
   @override
-  State<_Release> createState() => _ReleaseState();
+  State<_Release> createState() {
+    return _ReleaseState();
+  }
 }
 
 class _ReleaseState extends State<_Release> {
@@ -572,32 +796,117 @@ class _ReleaseState extends State<_Release> {
   static const _months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
   /// Today, Yesterday, 3 days ago, or 23 Oct 2026.
-  static String? _when(Object? iso) {
-    final d = DateTime.tryParse('${iso ?? ''}')?.toLocal();
-    if (d == null) return null;
+  static String? _relativeDate(Object? isoDate) {
+    var dateText = '';
+    if (isoDate != null) {
+      dateText = '$isoDate';
+    }
+    final parsed = DateTime.tryParse(dateText);
+    if (parsed == null) {
+      return null;
+    }
+    final date = parsed.toLocal();
     final now = DateTime.now();
-    final days = DateTime(now.year, now.month, now.day).difference(DateTime(d.year, d.month, d.day)).inDays;
-    if (days <= 0) return 'Today';
-    if (days == 1) return 'Yesterday';
-    if (days < 7) return '$days days ago';
-    return '${d.day} ${_months[d.month - 1]} ${d.year}';
+    final days = DateTime(now.year, now.month, now.day).difference(DateTime(date.year, date.month, date.day)).inDays;
+    if (days <= 0) {
+      return 'Today';
+    }
+    if (days == 1) {
+      return 'Yesterday';
+    }
+    if (days < 7) {
+      return '$days days ago';
+    }
+    return '${date.day} ${_months[date.month - 1]} ${date.year}';
   }
 
+  void _toggleOpen() {
+    setState(() {
+      _open = !_open;
+    });
+  }
+
+  /// One release on the timeline: its dot or ring, its version (with New or Installed), when it
+  /// came out and how many changes, and, opened, its summary, its groups of changes and a link to
+  /// it on GitHub.
   @override
   Widget build(BuildContext context) {
-    final s = Theme.of(context).colorScheme;
-    final t = Theme.of(context).textTheme;
-    final r = widget.release;
-    final v = '${r['version']}';
-    final notes = ReleaseNotes.parse(r['notes'] as String?);
+    final scheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+    final release = widget.release;
+    final version = '${release['version']}';
+    final notes = ReleaseNotes.parse(release['notes'] as String?);
     final count = notes.count;
-    final when = _when(r['date']);
-    final much = count == 0 ? null : '$count ${count == 1 ? 'change' : 'changes'}';
-    final meta = [?when, ?much].join(' · ');
-    final anything = notes.groups.isNotEmpty || notes.summary.isNotEmpty;
-    final ring = widget.isNew || widget.installed;
-    final reduce = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
-    final page = r['page'];
+    final whenReleased = _relativeDate(release['date']);
+    String? changesText;
+    if (count != 0) {
+      if (count == 1) {
+        changesText = '$count change';
+      } else {
+        changesText = '$count changes';
+      }
+    }
+    final meta = [
+      if (whenReleased != null) whenReleased,
+      if (changesText != null) changesText,
+    ].join(' · ');
+    final hasAnything = notes.groups.isNotEmpty || notes.summary.isNotEmpty;
+    final showRing = widget.isNew || widget.installed;
+    var reduceMotion = false;
+    final disableAnimations = MediaQuery.maybeDisableAnimationsOf(context);
+    if (disableAnimations != null) {
+      reduceMotion = disableAnimations;
+    }
+    final page = release['page'];
+
+    // The timeline's marker: a ring for the release you'd get or have, a dot for the rest.
+    double markerTop;
+    double markerSize;
+    Color markerColor;
+    BoxBorder? markerBorder;
+    if (showRing) {
+      markerTop = 7;
+      markerSize = 16;
+      markerColor = scheme.surface;
+      markerBorder = Border.all(color: scheme.primary, width: 3);
+    } else {
+      markerTop = 10;
+      markerSize = 10;
+      markerColor = scheme.outline;
+      markerBorder = null;
+    }
+
+    // Only a release with notes opens and closes.
+    bool? expandedState;
+    VoidCallback? onHeaderTap;
+    if (hasAnything) {
+      expandedState = _open;
+      onHeaderTap = _toggleOpen;
+    }
+
+    Color badgeColor;
+    String badgeText;
+    Color badgeTextColor;
+    if (widget.isNew) {
+      badgeColor = scheme.primary;
+      badgeText = 'New';
+      badgeTextColor = scheme.onPrimary;
+    } else {
+      badgeColor = scheme.primaryContainer;
+      badgeText = 'Installed';
+      badgeTextColor = scheme.onPrimaryContainer;
+    }
+
+    double chevronTurns = 0;
+    if (_open) {
+      chevronTurns = 0.5;
+    }
+    Duration animationDuration;
+    if (reduceMotion) {
+      animationDuration = Duration.zero;
+    } else {
+      animationDuration = const Duration(milliseconds: 200);
+    }
 
     return IntrinsicHeight(
       child: Row(
@@ -609,16 +918,16 @@ class _ReleaseState extends State<_Release> {
             child: Stack(
               alignment: Alignment.topCenter,
               children: [
-                if (!widget.last) Positioned(top: 10, bottom: 0, child: Container(width: 2, color: s.outlineVariant)),
+                if (!widget.isLast) Positioned(top: 10, bottom: 0, child: Container(width: 2, color: scheme.outlineVariant)),
                 Padding(
-                  padding: EdgeInsets.only(top: ring ? 7 : 10),
+                  padding: EdgeInsets.only(top: markerTop),
                   child: Container(
-                    width: ring ? 16 : 10,
-                    height: ring ? 16 : 10,
+                    width: markerSize,
+                    height: markerSize,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      color: ring ? s.surface : s.outline,
-                      border: ring ? Border.all(color: s.primary, width: 3) : null,
+                      color: markerColor,
+                      border: markerBorder,
                     ),
                   ),
                 ),
@@ -632,13 +941,13 @@ class _ReleaseState extends State<_Release> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Semantics(
-                    button: anything,
-                    expanded: anything ? _open : null,
-                    label: 'Version $v',
+                    button: hasAnything,
+                    expanded: expandedState,
+                    label: 'Version $version',
                     child: InkWell(
                       mouseCursor: WidgetStateMouseCursor.clickable,
                       borderRadius: BorderRadius.circular(16),
-                      onTap: anything ? () => setState(() => _open = !_open) : null,
+                      onTap: onHeaderTap,
                       child: Padding(
                         padding: const EdgeInsets.fromLTRB(12, 0, 4, 4),
                         child: Row(
@@ -652,19 +961,19 @@ class _ReleaseState extends State<_Release> {
                                     spacing: 10,
                                     children: [
                                       Text(
-                                        'v$v',
-                                        style: t.titleLarge?.copyWith(color: s.onSurface, fontWeight: FontWeight.bold),
+                                        'v$version',
+                                        style: _styleWith(textTheme.titleLarge, color: scheme.onSurface, fontWeight: FontWeight.bold),
                                       ),
-                                      if (ring)
+                                      if (showRing)
                                         Container(
                                           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                                           decoration: BoxDecoration(
-                                            color: widget.isNew ? s.primary : s.primaryContainer,
+                                            color: badgeColor,
                                             borderRadius: BorderRadius.circular(16),
                                           ),
                                           child: Text(
-                                            widget.isNew ? 'New' : 'Installed',
-                                            style: t.labelLarge?.copyWith(color: widget.isNew ? s.onPrimary : s.onPrimaryContainer),
+                                            badgeText,
+                                            style: _styleWith(textTheme.labelLarge, color: badgeTextColor),
                                           ),
                                         ),
                                     ],
@@ -672,18 +981,18 @@ class _ReleaseState extends State<_Release> {
                                   if (meta.isNotEmpty)
                                     Padding(
                                       padding: const EdgeInsets.only(top: 4),
-                                      child: Text(meta, style: t.bodyMedium?.copyWith(color: s.onSurfaceVariant)),
+                                      child: Text(meta, style: _styleWith(textTheme.bodyMedium, color: scheme.onSurfaceVariant)),
                                     ),
                                 ],
                               ),
                             ),
-                            if (anything)
+                            if (hasAnything)
                               Padding(
                                 padding: const EdgeInsets.only(left: 8),
                                 child: AnimatedRotation(
-                                  turns: _open ? 0.5 : 0,
-                                  duration: reduce ? Duration.zero : const Duration(milliseconds: 200),
-                                  child: AppIcon('chevron-down', size: 24, color: s.onSurfaceVariant),
+                                  turns: chevronTurns,
+                                  duration: animationDuration,
+                                  child: AppIcon('chevron-down', size: 24, color: scheme.onSurfaceVariant),
                                 ),
                               ),
                           ],
@@ -692,41 +1001,51 @@ class _ReleaseState extends State<_Release> {
                     ),
                   ),
                   AnimatedSize(
-                    duration: reduce ? Duration.zero : const Duration(milliseconds: 200),
+                    duration: animationDuration,
                     alignment: Alignment.topCenter,
-                    child: !_open
-                        ? const SizedBox(width: double.infinity)
-                        : Padding(
-                            padding: const EdgeInsets.only(left: 12),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
-                              children: [
-                                if (notes.summary.isNotEmpty)
-                                  Padding(
-                                    padding: const EdgeInsets.only(top: 12),
-                                    child: Text(notes.summary, style: t.bodyMedium?.copyWith(color: s.onSurfaceVariant)),
-                                  ),
-                                for (var g = 0; g < notes.groups.length; g++) _GroupCard(group: notes.groups[g], index: g),
-                                if (page is String && page.isNotEmpty)
-                                  Align(
-                                    alignment: Alignment.centerLeft,
-                                    child: Padding(
-                                      padding: const EdgeInsets.only(top: 8),
-                                      child: TextButton.icon(
-                                        onPressed: () => launchUrl(Uri.parse(page), mode: LaunchMode.externalApplication),
-                                        icon: AppIcon('link', size: 16, color: s.primary),
-                                        label: const Text('On GitHub'),
-                                      ),
-                                    ),
-                                  ),
-                              ],
-                            ),
-                          ),
+                    child: _details(scheme, textTheme, notes, page),
                   ),
                 ],
               ),
             ),
           ),
+        ],
+      ),
+    );
+  }
+
+  /// What's under a release's heading: nothing while it's closed; opened, its summary, its groups
+  /// of changes, and a link to it on GitHub when there is one.
+  Widget _details(ColorScheme scheme, TextTheme textTheme, ReleaseNotes notes, Object? page) {
+    if (!_open) {
+      return const SizedBox(width: double.infinity);
+    }
+    return Padding(
+      padding: const EdgeInsets.only(left: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (notes.summary.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 12),
+              child: Text(notes.summary, style: _styleWith(textTheme.bodyMedium, color: scheme.onSurfaceVariant)),
+            ),
+          for (var groupIndex = 0; groupIndex < notes.groups.length; groupIndex = groupIndex + 1)
+            _GroupCard(group: notes.groups[groupIndex], index: groupIndex),
+          if (page is String && page.isNotEmpty)
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: TextButton.icon(
+                  onPressed: () {
+                    launchUrl(Uri.parse(page), mode: LaunchMode.externalApplication);
+                  },
+                  icon: AppIcon('link', size: 16, color: scheme.primary),
+                  label: const Text('On GitHub'),
+                ),
+              ),
+            ),
         ],
       ),
     );
@@ -741,86 +1060,123 @@ class _GroupCard extends StatefulWidget {
   final int index;
 
   @override
-  State<_GroupCard> createState() => _GroupCardState();
+  State<_GroupCard> createState() {
+    return _GroupCardState();
+  }
 }
 
 class _GroupCardState extends State<_GroupCard> {
-  static const _first = 4;
-  bool _all = false;
+  static const _shownAtFirst = 4;
+  bool _showAll = false;
 
+  /// The icon for a group, from the words in its title: a phone for Android, a monitor for the
+  /// desktop, and so on, or a star when none fits.
   static String _icon(String title) {
-    final t = title.toLowerCase();
-    if (t.contains('android') || t.contains('phone')) return 'phone';
-    if (t.contains('windows') || t.contains('mac') || t.contains('linux') || t.contains('desktop')) return 'monitor';
-    if (t.contains('everywhere') || t.contains('website')) return 'globe';
-    if (t.contains('host')) return 'users';
-    if (t.contains('check') && t.contains('in')) return 'check';
-    if (t.contains('wifi') || t.contains('offline')) return 'wifi';
-    if (t.contains('tap') || t.contains('nfc')) return 'tap';
-    if (t.contains('bluetooth')) return 'bluetooth';
-    if (t.contains('look') || t.contains('theme')) return 'sun';
-    if (t.contains('fix') || t.contains('easier')) return 'check';
+    final lowerTitle = title.toLowerCase();
+    if (lowerTitle.contains('android') || lowerTitle.contains('phone')) {
+      return 'phone';
+    }
+    if (lowerTitle.contains('windows') || lowerTitle.contains('mac') || lowerTitle.contains('linux') || lowerTitle.contains('desktop')) {
+      return 'monitor';
+    }
+    if (lowerTitle.contains('everywhere') || lowerTitle.contains('website')) {
+      return 'globe';
+    }
+    if (lowerTitle.contains('host')) {
+      return 'users';
+    }
+    if (lowerTitle.contains('check') && lowerTitle.contains('in')) {
+      return 'check';
+    }
+    if (lowerTitle.contains('wifi') || lowerTitle.contains('offline')) {
+      return 'wifi';
+    }
+    if (lowerTitle.contains('tap') || lowerTitle.contains('nfc')) {
+      return 'tap';
+    }
+    if (lowerTitle.contains('bluetooth')) {
+      return 'bluetooth';
+    }
+    if (lowerTitle.contains('look') || lowerTitle.contains('theme')) {
+      return 'sun';
+    }
+    if (lowerTitle.contains('fix') || lowerTitle.contains('easier')) {
+      return 'check';
+    }
     return 'star';
   }
 
+  void _showEverything() {
+    setState(() {
+      _showAll = true;
+    });
+  }
+
+  /// The card: a header with the group's icon tile, title and count, then each item shown (with
+  /// its title in bold and its text under it), then Show all while some are still hidden.
   @override
   Widget build(BuildContext context) {
-    final s = Theme.of(context).colorScheme;
-    final t = Theme.of(context).textTheme;
-    final g = widget.group;
+    final scheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+    final group = widget.group;
     // Its colours by its place: primary, tertiary, then secondary, round again.
     final tones = [
-      (s.primaryContainer, s.onPrimaryContainer, s.primary),
-      (s.tertiaryContainer, s.onTertiaryContainer, s.tertiary),
-      (s.secondaryContainer, s.onSecondaryContainer, s.secondary),
+      (scheme.primaryContainer, scheme.onPrimaryContainer, scheme.primary),
+      (scheme.tertiaryContainer, scheme.onTertiaryContainer, scheme.tertiary),
+      (scheme.secondaryContainer, scheme.onSecondaryContainer, scheme.secondary),
     ];
-    final (tile, onTile, accent) = tones[widget.index % tones.length];
-    final shown = _all ? g.items : g.items.take(_first).toList();
+    final (tileColor, tileIconColor, accentColor) = tones[widget.index % tones.length];
+    List<ReleaseItem> shownItems;
+    if (_showAll) {
+      shownItems = group.items;
+    } else {
+      shownItems = group.items.take(_shownAtFirst).toList();
+    }
     return Card.outlined(
       margin: const EdgeInsets.only(top: 12),
-      color: s.surfaceContainerLow,
+      color: scheme.surfaceContainerLow,
       clipBehavior: Clip.antiAlias,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(24),
-        side: BorderSide(color: s.outlineVariant),
+        side: BorderSide(color: scheme.outlineVariant),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Container(
-            color: s.surfaceContainerHigh,
+            color: scheme.surfaceContainerHigh,
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             child: Row(
               children: [
                 Container(
                   width: 36,
                   height: 36,
-                  decoration: BoxDecoration(color: tile, borderRadius: BorderRadius.circular(10)),
-                  child: Center(child: AppIcon(_icon(g.title), size: 20, color: onTile)),
+                  decoration: BoxDecoration(color: tileColor, borderRadius: BorderRadius.circular(10)),
+                  child: Center(child: AppIcon(_icon(group.title), size: 20, color: tileIconColor)),
                 ),
                 const SizedBox(width: 14),
                 Expanded(
                   child: Text(
-                    g.title,
-                    style: t.titleMedium?.copyWith(color: s.onSurface, fontWeight: FontWeight.bold),
+                    group.title,
+                    style: _styleWith(textTheme.titleMedium, color: scheme.onSurface, fontWeight: FontWeight.bold),
                   ),
                 ),
                 const SizedBox(width: 8),
                 Container(
                   constraints: const BoxConstraints(minWidth: 32),
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(color: s.surfaceContainerHighest, borderRadius: BorderRadius.circular(14)),
+                  decoration: BoxDecoration(color: scheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(14)),
                   child: Text(
-                    '${g.items.length}',
+                    '${group.items.length}',
                     textAlign: TextAlign.center,
-                    style: t.labelLarge?.copyWith(color: s.onSurfaceVariant),
+                    style: _styleWith(textTheme.labelLarge, color: scheme.onSurfaceVariant),
                   ),
                 ),
               ],
             ),
           ),
-          for (final item in shown) ...[
-            Divider(height: 1, thickness: 1, color: s.outlineVariant),
+          for (final item in shownItems) ...[
+            Divider(height: 1, thickness: 1, color: scheme.outlineVariant),
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 14, 20, 14),
               child: Row(
@@ -830,18 +1186,18 @@ class _GroupCardState extends State<_GroupCard> {
                     margin: const EdgeInsets.only(top: 7),
                     width: 8,
                     height: 8,
-                    decoration: BoxDecoration(color: accent, shape: BoxShape.circle),
+                    decoration: BoxDecoration(color: accentColor, shape: BoxShape.circle),
                   ),
                   const SizedBox(width: 16),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(_capital(item.title.isEmpty ? item.text : item.title), style: t.titleSmall?.copyWith(color: s.onSurface)),
+                        Text(_itemHeadline(item), style: _styleWith(textTheme.titleSmall, color: scheme.onSurface)),
                         if (item.title.isNotEmpty && item.text.isNotEmpty)
                           Padding(
                             padding: const EdgeInsets.only(top: 2),
-                            child: Text(_capital(item.text), style: t.bodyMedium?.copyWith(color: s.onSurfaceVariant)),
+                            child: Text(_capitalised(item.text), style: _styleWith(textTheme.bodyMedium, color: scheme.onSurfaceVariant)),
                           ),
                       ],
                     ),
@@ -850,19 +1206,19 @@ class _GroupCardState extends State<_GroupCard> {
               ),
             ),
           ],
-          if (!_all && g.items.length > _first) ...[
-            Divider(height: 1, thickness: 1, color: s.outlineVariant),
+          if (!_showAll && group.items.length > _shownAtFirst) ...[
+            Divider(height: 1, thickness: 1, color: scheme.outlineVariant),
             InkWell(
               mouseCursor: WidgetStateMouseCursor.clickable,
-              onTap: () => setState(() => _all = true),
+              onTap: _showEverything,
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
                 child: Row(
                   children: [
                     Expanded(
-                      child: Text('Show all (${g.items.length})', style: t.labelLarge?.copyWith(color: s.primary)),
+                      child: Text('Show all (${group.items.length})', style: _styleWith(textTheme.labelLarge, color: scheme.primary)),
                     ),
-                    AppIcon('chevron-down', size: 20, color: s.primary),
+                    AppIcon('chevron-down', size: 20, color: scheme.primary),
                   ],
                 ),
               ),
@@ -873,5 +1229,19 @@ class _GroupCardState extends State<_GroupCard> {
     );
   }
 
-  static String _capital(String s) => s.isEmpty ? s : s[0].toUpperCase() + s.substring(1);
+  /// An item's first line: its title, or its text when it has no title, with a capital first.
+  static String _itemHeadline(ReleaseItem item) {
+    if (item.title.isEmpty) {
+      return _capitalised(item.text);
+    }
+    return _capitalised(item.title);
+  }
+
+  /// The text with its first letter a capital.
+  static String _capitalised(String text) {
+    if (text.isEmpty) {
+      return text;
+    }
+    return text[0].toUpperCase() + text.substring(1);
+  }
 }

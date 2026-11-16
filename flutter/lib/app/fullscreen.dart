@@ -15,7 +15,9 @@ class Fullscreen {
   /// Set by the desktop layer: the window, full screen or not.
   static Future<void> Function(bool on)? desktop;
 
-  static Future<void> toggle() => set(!on.value);
+  static Future<void> toggle() {
+    return set(!on.value);
+  }
 
   static Future<void> set(bool value) async {
     on.value = value;
@@ -32,9 +34,15 @@ class Fullscreen {
   /// navigation bar with it.
   static Future<void> applySystemBars() async {
     if (!Env.android) return;
-    await SystemChrome.setEnabledSystemUIMode(
-      on.value ? SystemUiMode.immersiveSticky : SystemUiMode.manual,
-      overlays: on.value ? const [] : const [SystemUiOverlay.bottom],
-    );
+    final SystemUiMode mode;
+    final List<SystemUiOverlay> overlays;
+    if (on.value) {
+      mode = SystemUiMode.immersiveSticky;
+      overlays = const [];
+    } else {
+      mode = SystemUiMode.manual;
+      overlays = const [SystemUiOverlay.bottom];
+    }
+    await SystemChrome.setEnabledSystemUIMode(mode, overlays: overlays);
   }
 }

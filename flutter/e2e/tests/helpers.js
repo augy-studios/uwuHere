@@ -4,13 +4,26 @@ export const API = "https://here.uwuapps.org/api";
 
 let counter = 0;
 const CODE_ALPHABET = "BCDFGHJKLMNPQRSTVWXYZ23456789";
-const newCode = () => Array.from({ length: 6 }, (_, i) => CODE_ALPHABET[(counter * 7 + i * 11 + 3) % CODE_ALPHABET.length]).join("");
-const hostKeyFor = (code) => `${code}`.padEnd(43, "k").slice(0, 43);
 
-/** An event as the server keeps it, in db.events[code]. */
-export function makeEvent(db, fields = {}) {
-  counter += 1;
-  const code = fields.code ?? newCode();
+/** A six-character event code made from the counter, so each test run gets the same codes. */
+const newCode = () => {
+  return Array.from({ length: 6 }, (unusedValue, characterIndex) => {
+    return CODE_ALPHABET[(counter * 7 + characterIndex * 11 + 3) % CODE_ALPHABET.length];
+  }).join("");
+};
+
+/** A 43-character host key made from the code, padded with "k". */
+const hostKeyFor = (code) => {
+  return `${code}`.padEnd(43, "k").slice(0, 43);
+};
+
+/** An event as the server keeps it, in database.events[code]. */
+export function makeEvent(database, fields = {}) {
+  counter = counter + 1;
+  let code = fields.code;
+  if (code === null || code === undefined) {
+    code = newCode();
+  }
   const now = new Date().toISOString();
   const event = {
     code,
@@ -31,48 +44,86 @@ export function makeEvent(db, fields = {}) {
     hasPassword: false,
     ...fields,
   };
-  db.events[code] = { event, attendees: [], hostKey: hostKeyFor(code), password: fields.password ?? null, devices: {} };
-  return db.events[code];
+  let password = fields.password;
+  if (password === null || password === undefined) {
+    password = null;
+  }
+  database.events[code] = { event, attendees: [], hostKey: hostKeyFor(code), password, devices: {} };
+  return database.events[code];
 }
 
 /**
  * uwuHere's API (main-site/api/*), answered here from an in-memory store, so the suite runs
  * offline and the same every time: events, the host's actions, check-ins by location and by tap,
  * leaving early, unlocking with a password, the release check and Report a bug. Every request is
- * kept in `db.requests`.
+ * kept in `database.requests`.
  */
-export async function mockApi(page, db = {}) {
-  db.requests = [];
-  db.events ??= {};
-  db.release ??= { version: null, history: [] };
+export async function mockApi(page, database = {}) {
+  database.requests = [];
+  if (database.events === null || database.events === undefined) {
+    database.events = {};
+  }
+  if (database.release === null || database.release === undefined) {
+    database.release = { version: null, history: [] };
+  }
   await page.route(`${API}/**`, async (route) => {
-    const req = route.request();
-    const url = new URL(req.url());
+    const request = route.request();
+    const url = new URL(request.url());
     const path = url.pathname.replace(/^\/api/, "");
-    const body = req.postData() ? JSON.parse(req.postData()) : null;
-    db.requests.push({ method: req.method(), path, body, query: Object.fromEntries(url.searchParams) });
+    let body = null;
+    if (request.postData()) {
+      body = JSON.parse(request.postData());
+    }
+    database.requests.push({ method: request.method(), path, body, query: Object.fromEntries(url.searchParams) });
     const headers = { "access-control-allow-origin": "*", "access-control-allow-headers": "*" };
-    const raw = (status, data) => route.fulfill({ status, contentType: "application/json", headers, body: JSON.stringify(data) });
-    const ok = (data) => raw(200, { ok: true, data });
-    const fail = (status, reason, error) => raw(status, { ok: false, reason, error });
-    if (req.method() === "OPTIONS") {
+    const respond = (status, data) => {
+      return route.fulfill({ status, contentType: "application/json", headers, body: JSON.stringify(data) });
+    };
+    const respondOk = (data) => {
+      return respond(200, { ok: true, data });
+    };
+    const respondFail = (status, reason, error) => {
+      return respond(status, { ok: false, reason, error });
+    };
+    if (request.method() === "OPTIONS") {
       return route.fulfill({ status: 204, headers: { ...headers, "access-control-allow-methods": "*" } });
     }
-    if (db.offline) return route.abort("internetdisconnected");
-    const snapshot = (e) => ({ event: e.event, attendees: e.attendees });
+    if (database.offline) {
+      return route.abort("internetdisconnected");
+    }
+    const snapshot = (eventRecord) => {
+      return { event: eventRecord.event, attendees: eventRecord.attendees };
+    };
     switch (path) {
       case "/app-release":
-        return raw(200, db.release);
+        return respond(200, database.release);
       case "/bug-report":
-        (db.bugReports ??= []).push(body);
-        if (db.bugStatus && db.bugStatus !== 200) return raw(db.bugStatus, { error: "Bug reports can't be sent from the app yet." });
-        return raw(200, { id: "20261116-7K3Q" });
+        if (database.bugReports === null || database.bugReports === undefined) {
+          database.bugReports = [];
+        }
+        database.bugReports.push(body);
+        if (database.bugStatus && database.bugStatus !== 200) {
+          return respond(database.bugStatus, { error: "Bug reports can't be sent from the app yet." });
+        }
+        return respond(200, { id: "20261116-7K3Q" });
       case "/events": {
-        const e = makeEvent(db, {
-          title: body.title ?? "",
+        let title = body.title;
+        if (title === null || title === undefined) {
+          title = "";
+        }
+        let noteLabel = body.noteLabel;
+        if (!noteLabel) {
+          noteLabel = null;
+        }
+        let password = body.password;
+        if (password === null || password === undefined) {
+          password = null;
+        }
+        const eventRecord = makeEvent(database, {
+          title,
           buttonLabel: body.buttonLabel,
           buttonColor: body.buttonColor,
-          noteLabel: body.noteLabel || null,
+          noteLabel,
           allowP2p: body.allowP2p,
           allowLocation: body.allowLocation,
           allowTap: body.allowTap,
@@ -80,100 +131,182 @@ export async function mockApi(page, db = {}) {
           radius: body.radius,
           hasLocation: Boolean(body.location),
           hasPassword: Boolean(body.password),
-          password: body.password ?? null,
+          password,
         });
-        return ok({ code: e.event.code, hostKey: e.hostKey, ...snapshot(e) });
+        return respondOk({ code: eventRecord.event.code, hostKey: eventRecord.hostKey, ...snapshot(eventRecord) });
       }
       case "/event": {
-        const e = db.events[url.searchParams.get("code")];
-        if (!e) return fail(404, "not-found", "No event with that code.");
-        const { hasPassword, ...pub } = e.event;
-        const device = req.headers()["x-uwuhere-device"];
-        const me = device && e.devices[device];
-        return ok({ ...pub, me: me ? { checkedInAt: me.checkedInAt, leftEarlyAt: me.leftEarlyAt } : null });
+        const eventRecord = database.events[url.searchParams.get("code")];
+        if (!eventRecord) {
+          return respondFail(404, "not-found", "No event with that code.");
+        }
+        // Everything but hasPassword is what anyone may see.
+        const { hasPassword, ...publicFields } = eventRecord.event;
+        const device = request.headers()["x-uwuhere-device"];
+        let myCheckIn = device;
+        if (device) {
+          myCheckIn = eventRecord.devices[device];
+        }
+        let me = null;
+        if (myCheckIn) {
+          me = { checkedInAt: myCheckIn.checkedInAt, leftEarlyAt: myCheckIn.leftEarlyAt };
+        }
+        return respondOk({ ...publicFields, me });
       }
       case "/checkin": {
-        const e = db.events[body.code];
-        if (!e) return fail(404, "not-found", "No event with that code.");
-        if (e.event.ended) return fail(409, "ended", "This event has ended.");
-        if (e.event.paused) return fail(409, "paused", "The host has paused check-ins for now.");
-        if (e.devices[body.deviceId]) return ok({ attendee: e.devices[body.deviceId], already: true });
-        const a = {
-          id: `a${e.attendees.length + 1}`,
+        const eventRecord = database.events[body.code];
+        if (!eventRecord) {
+          return respondFail(404, "not-found", "No event with that code.");
+        }
+        if (eventRecord.event.ended) {
+          return respondFail(409, "ended", "This event has ended.");
+        }
+        if (eventRecord.event.paused) {
+          return respondFail(409, "paused", "The host has paused check-ins for now.");
+        }
+        if (eventRecord.devices[body.deviceId]) {
+          return respondOk({ attendee: eventRecord.devices[body.deviceId], already: true });
+        }
+        let note = body.note;
+        if (note === null || note === undefined) {
+          note = null;
+        }
+        let method;
+        if (body.tap) {
+          if (body.late) {
+            method = "tap_late";
+          } else {
+            method = "tap";
+          }
+        } else {
+          method = "location";
+        }
+        let distance;
+        if (body.tap) {
+          distance = null;
+        } else {
+          distance = 12;
+        }
+        const attendee = {
+          id: `a${eventRecord.attendees.length + 1}`,
           name: body.name,
-          note: body.note ?? null,
-          method: body.tap ? (body.late ? "tap_late" : "tap") : "location",
-          distance: body.tap ? null : 12,
+          note,
+          method,
+          distance,
           checkedInAt: new Date().toISOString(),
           leftEarlyAt: null,
         };
-        e.attendees.push(a);
-        e.devices[body.deviceId] = a;
-        return ok({ attendee: a });
+        eventRecord.attendees.push(attendee);
+        eventRecord.devices[body.deviceId] = attendee;
+        return respondOk({ attendee });
       }
       case "/leave": {
-        const e = db.events[body.code];
-        const a = e?.devices[body.deviceId];
-        if (!a) return fail(404, "not-checked-in", "You haven't checked in.");
-        a.leftEarlyAt = new Date().toISOString();
-        return ok({ attendee: a });
+        const eventRecord = database.events[body.code];
+        let attendee;
+        if (eventRecord === null || eventRecord === undefined) {
+          attendee = undefined;
+        } else {
+          attendee = eventRecord.devices[body.deviceId];
+        }
+        if (!attendee) {
+          return respondFail(404, "not-checked-in", "You haven't checked in.");
+        }
+        attendee.leftEarlyAt = new Date().toISOString();
+        return respondOk({ attendee });
       }
       case "/unlock": {
-        const e = db.events[body.code];
-        if (!e) return fail(404, "not-found", "No event with that code.");
-        if (!e.password || e.password !== body.password) return fail(403, "wrong-password", "That password isn't right.");
-        return ok({ hostKey: e.hostKey, ...snapshot(e) });
+        const eventRecord = database.events[body.code];
+        if (!eventRecord) {
+          return respondFail(404, "not-found", "No event with that code.");
+        }
+        if (!eventRecord.password || eventRecord.password !== body.password) {
+          return respondFail(403, "wrong-password", "That password isn't right.");
+        }
+        return respondOk({ hostKey: eventRecord.hostKey, ...snapshot(eventRecord) });
       }
       case "/host": {
-        const e = db.events[body.code];
-        if (!e) return fail(404, "not-found", "No event with that code.");
-        if (body.hostKey !== e.hostKey) return fail(403, "not-host", "This device can't manage this event.");
+        const eventRecord = database.events[body.code];
+        if (!eventRecord) {
+          return respondFail(404, "not-found", "No event with that code.");
+        }
+        if (body.hostKey !== eventRecord.hostKey) {
+          return respondFail(403, "not-host", "This device can't manage this event.");
+        }
         const now = new Date().toISOString();
         switch (body.action) {
           case "get":
-            return ok(snapshot(e));
+            return respondOk(snapshot(eventRecord));
           case "add":
           case "record": {
-            if (e.event.ended) return fail(409, "ended", "This event has ended.");
-            const a = {
-              id: `a${e.attendees.length + 1}`,
+            if (eventRecord.event.ended) {
+              return respondFail(409, "ended", "This event has ended.");
+            }
+            let note = body.note;
+            if (note === null || note === undefined) {
+              note = null;
+            }
+            let method;
+            if (body.action === "add") {
+              method = "manual";
+            } else if (body.method) {
+              method = body.method;
+            } else {
+              method = "p2p";
+            }
+            let checkedInAt = body.at;
+            if (!checkedInAt) {
+              checkedInAt = now;
+            }
+            const attendee = {
+              id: `a${eventRecord.attendees.length + 1}`,
               name: body.name,
-              note: body.note ?? null,
-              method: body.action === "add" ? "manual" : body.method || "p2p",
+              note,
+              method,
               distance: null,
-              checkedInAt: body.at || now,
+              checkedInAt,
               leftEarlyAt: null,
             };
-            e.attendees.push(a);
-            return ok({ attendee: a });
+            eventRecord.attendees.push(attendee);
+            return respondOk({ attendee });
           }
           case "remove":
-            e.attendees = e.attendees.filter((a) => a.id !== body.attendeeId);
-            return ok(snapshot(e));
+            eventRecord.attendees = eventRecord.attendees.filter((attendee) => {
+              return attendee.id !== body.attendeeId;
+            });
+            return respondOk(snapshot(eventRecord));
           case "pause":
           case "resume":
-            e.event.paused = body.action === "pause";
-            return ok(snapshot(e));
-          case "update":
-            Object.assign(e.event, body.settings, { hasLocation: e.event.hasLocation || Boolean(body.settings.location) });
-            delete e.event.location;
-            return ok(snapshot(e));
+            eventRecord.event.paused = body.action === "pause";
+            return respondOk(snapshot(eventRecord));
+          case "update": {
+            let hasLocation = eventRecord.event.hasLocation;
+            if (!hasLocation) {
+              hasLocation = Boolean(body.settings.location);
+            }
+            Object.assign(eventRecord.event, body.settings, { hasLocation });
+            delete eventRecord.event.location;
+            return respondOk(snapshot(eventRecord));
+          }
           case "password":
-            e.password = body.password || null;
-            e.event.hasPassword = Boolean(body.password);
-            return ok(snapshot(e));
+            if (body.password) {
+              eventRecord.password = body.password;
+            } else {
+              eventRecord.password = null;
+            }
+            eventRecord.event.hasPassword = Boolean(body.password);
+            return respondOk(snapshot(eventRecord));
           case "end":
-            e.event.ended = true;
-            e.event.endedAt = now;
-            return ok(snapshot(e));
+            eventRecord.event.ended = true;
+            eventRecord.event.endedAt = now;
+            return respondOk(snapshot(eventRecord));
         }
-        return fail(400, "bad-action", "Unknown action.");
+        return respondFail(400, "bad-action", "Unknown action.");
       }
       default:
-        return raw(404, { ok: false, error: "Not found", reason: "not-found" });
+        return respond(404, { ok: false, error: "Not found", reason: "not-found" });
     }
   });
-  return db;
+  return database;
 }
 
 /**
@@ -183,23 +316,42 @@ export async function mockApi(page, db = {}) {
  */
 export async function seed(page, values = {}, { tours = false } = {}) {
   await page.addInitScript(
-    ([values, tours]) => {
-      if (sessionStorage.getItem("seeded")) return;
+    ([valuesToStore, showTours]) => {
+      if (sessionStorage.getItem("seeded")) {
+        return;
+      }
       sessionStorage.setItem("seeded", "1");
-      const put = (k, v) => localStorage.setItem(`flutter.ls.${k}`, JSON.stringify(typeof v === "string" ? v : JSON.stringify(v)));
-      if (!tours) {
+      const put = (key, value) => {
+        let encoded;
+        if (typeof value === "string") {
+          encoded = value;
+        } else {
+          encoded = JSON.stringify(value);
+        }
+        localStorage.setItem(`flutter.ls.${key}`, JSON.stringify(encoded));
+      };
+      if (!showTours) {
         put("uwuhere.tour.welcome", "done");
         put("uwuhere.tour.pages", ["host", "join"]);
       }
-      for (const [k, v] of Object.entries(values)) put(k, v);
+      for (const [key, value] of Object.entries(valuesToStore)) {
+        put(key, value);
+      }
     },
     [values, tours],
   );
 }
 
 /** What a device that hosts these events keeps (store.js's uwuhere.hosted). */
-export const hosted = (...events) =>
-  Object.fromEntries(events.map((e) => [e.event.code, { hostKey: e.hostKey, title: e.event.title, createdAt: e.event.createdAt, ended: e.event.ended }]));
+export const hosted = (...events) => {
+  const entries = events.map((eventRecord) => {
+    return [
+      eventRecord.event.code,
+      { hostKey: eventRecord.hostKey, title: eventRecord.event.title, createdAt: eventRecord.event.createdAt, ended: eventRecord.event.ended },
+    ];
+  });
+  return Object.fromEntries(entries);
+};
 
 /**
  * In a browser, each slider leaves an empty, nameless layer over the whole window (where its value
@@ -208,49 +360,89 @@ export const hosted = (...events) =>
  */
 export async function passThroughEmptyLayers(page) {
   await page.addInitScript(() => {
-    const add = () => {
+    const addStyle = () => {
       const style = document.createElement("style");
       style.textContent = "flt-semantics:empty:not([role]):not([aria-label]) { pointer-events: none !important; }";
       document.head.appendChild(style);
     };
-    if (document.head) add();
-    else document.addEventListener("DOMContentLoaded", add);
+    if (document.head) {
+      addStyle();
+    } else {
+      document.addEventListener("DOMContentLoaded", addStyle);
+    }
   });
 }
 
 /** The app, up, with the errors it logs collected. `query` like "?android=1". */
 export async function openApp(page, query = "", { ready } = {}) {
   const errors = [];
-  page.on("pageerror", (e) => errors.push(String(e)));
-  page.on("console", (m) => {
-    if (m.type() === "error" && !/favicon|Failed to load resource|peerjs|WebSocket|ERR_INTERNET_DISCONNECTED/i.test(m.text())) errors.push(m.text());
+  page.on("pageerror", (error) => {
+    errors.push(String(error));
+  });
+  page.on("console", (message) => {
+    if (message.type() === "error" && !/favicon|Failed to load resource|peerjs|WebSocket|ERR_INTERNET_DISCONNECTED/i.test(message.text())) {
+      errors.push(message.text());
+    }
   });
   await passThroughEmptyLayers(page);
   await page.goto(`/${query}`);
   page.appErrors = errors;
-  await expect(ready ? ready(page) : page.getByRole("heading", { name: /Checking in\?|Host an event/ }).first()).toBeVisible({ timeout: 30_000 });
+  let readyLocator;
+  if (ready) {
+    readyLocator = ready(page);
+  } else {
+    readyLocator = page.getByRole("heading", { name: /Checking in\?|Host an event/ }).first();
+  }
+  await expect(readyLocator).toBeVisible({ timeout: 30_000 });
   return errors;
 }
 
-export const button = (page, name, exact = true) => page.getByRole("button", { name, exact });
+export const button = (page, name, exact = true) => {
+  return page.getByRole("button", { name, exact });
+};
 
 /** What the app keeps, as shared_preferences has it in the browser. */
-export const stored = (page, key) =>
-  page.evaluate((k) => {
-    const v = localStorage.getItem(`flutter.ls.${k}`);
-    return v === null ? null : JSON.parse(v);
+export const stored = (page, key) => {
+  return page.evaluate((storeKey) => {
+    const value = localStorage.getItem(`flutter.ls.${storeKey}`);
+    if (value === null) {
+      return null;
+    }
+    return JSON.parse(value);
   }, key);
+};
 
+/** What the app keeps under `key`, read back from the JSON text it was stored as. */
 export const storedJson = async (page, key) => {
-  const v = await stored(page, key);
-  return v == null ? null : JSON.parse(v);
+  const value = await stored(page, key);
+  if (value === null || value === undefined) {
+    return null;
+  }
+  return JSON.parse(value);
 };
 
 /** What the app asked of its Android side. */
-export const calls = (page) => page.evaluate(() => Array.from(window.e2eCalls || []).map((c) => JSON.parse(c)));
+export const calls = (page) => {
+  return page.evaluate(() => {
+    let recordedCalls = window.e2eCalls;
+    if (!recordedCalls) {
+      recordedCalls = [];
+    }
+    return Array.from(recordedCalls).map((callJson) => {
+      return JSON.parse(callJson);
+    });
+  });
+};
 
 /** Says what Android would have said. */
-export const emit = (page, plugin, event, data) => page.evaluate(([p, e, d]) => window.e2eEmit(p, e, JSON.stringify(d)), [plugin, event, data]);
+export const emit = (page, plugin, event, data) => {
+  return page.evaluate(
+    ([pluginName, eventName, eventData]) => {
+      return window.e2eEmit(pluginName, eventName, JSON.stringify(eventData));
+    },
+    [plugin, event, data],
+  );
+};
 
 /** Types into a text field. */
 export async function fill(page, locator, text) {
@@ -273,23 +465,37 @@ export async function skipTour(page) {
 
 /** Nothing went wrong. `offline`: the browser's own bare "Error" for each request that failed. */
 export function noErrors(page, { offline = false } = {}) {
-  expect(page.appErrors.filter((e) => !/WebSocket|peerjs|broker|ERR_INTERNET_DISCONNECTED/i.test(e) && !(offline && e === "Error"))).toEqual([]);
+  const unexpectedErrors = page.appErrors.filter((error) => {
+    const isConnectionNoise = /WebSocket|peerjs|broker|ERR_INTERNET_DISCONNECTED/i.test(error);
+    const isOfflineRequestError = offline && error === "Error";
+    return !isConnectionNoise && !isOfflineRequestError;
+  });
+  expect(unexpectedErrors).toEqual([]);
 }
 
 /** A toast or note: said once to a screen reader and once on screen, so the one on screen. */
-export const said = (page, text) => page.getByText(text).last();
+export const said = (page, text) => {
+  return page.getByText(text).last();
+};
 
 /**
  * Brings something on a scrolling page into view: Flutter draws only what's near the screen, so
- * it's scrolled with the mouse wheel over the page till it's there.
+ * it's scrolled with the mouse wheel over the page till it's there. `pointerX`: where across the
+ * page the wheel is turned (the middle unless given).
  */
-export async function reveal(page, locator, { x } = {}) {
+export async function reveal(page, locator, { pointerX } = {}) {
   const size = page.viewportSize();
-  await page.mouse.move(x ?? size.width / 2, size.height * 0.6);
-  for (let i = 0; i < 40; i++) {
+  let pointerPositionX = pointerX;
+  if (pointerPositionX === null || pointerPositionX === undefined) {
+    pointerPositionX = size.width / 2;
+  }
+  await page.mouse.move(pointerPositionX, size.height * 0.6);
+  for (let attempt = 0; attempt < 40; attempt = attempt + 1) {
     if ((await locator.count()) && (await locator.first().isVisible())) {
       const box = await locator.first().boundingBox();
-      if (box && box.y >= 0 && box.y + box.height <= size.height) return locator.first();
+      if (box && box.y >= 0 && box.y + box.height <= size.height) {
+        return locator.first();
+      }
     }
     await page.mouse.wheel(0, 250);
     await page.waitForTimeout(120);

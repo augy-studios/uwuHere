@@ -22,7 +22,7 @@
 
 import { createHash } from "node:crypto";
 import { HttpError } from "./http.js";
-import * as v from "./validate.js";
+import * as validate from "./validate.js";
 
 const RUNS = [
   "abcdefghijklmnopqrstuvwxyz",
@@ -39,16 +39,22 @@ function squash(text) {
   return text.toLowerCase().normalize("NFKC").replace(/[^\p{L}\p{N}]/gu, "");
 }
 
+// Whether the text is a short piece said over and over, such as "abcabcabc",
+// with at most a few characters left over at the end.
 function isRepeat(text) {
   return /^(.{1,6}?)\1+.{0,6}$/u.test(text);
 }
 
+// Whether the text is a stretch of one of the RUNS, forwards or backwards,
+// wrapping round its end, such as "6789012" or "lkjhgfdsa".
 function isRun(text) {
-  if (text.length < 4) return false;
+  if (text.length < 4) {
+    return false;
+  }
   return RUNS.some((run) => {
-    const loop = run.repeat(Math.ceil((text.length * 2) / run.length) + 2);
-    const back = [...loop].reverse().join("");
-    return loop.includes(text) || back.includes(text);
+    const repeatedRun = run.repeat(Math.ceil((text.length * 2) / run.length) + 2);
+    const reversedRun = [...repeatedRun].reverse().join("");
+    return repeatedRun.includes(text) || reversedRun.includes(text);
   });
 }
 
@@ -57,15 +63,20 @@ function isRun(text) {
  * enough; returns it otherwise. `context` is the event's own words.
  */
 export async function checkHostPassword(input, { title = "", code = "" } = {}) {
-  const password = v.password(input);
-  const plain = squash(password);
+  const password = validate.password(input);
+  const squashedPassword = squash(password);
 
-  if (isRepeat(plain) || isRun(plain)) {
+  if (isRepeat(squashedPassword) || isRun(squashedPassword)) {
     throw new HttpError(422, "That password is a repeat or a run of keys. Pick something less predictable.", "weak-password");
   }
 
-  const own = ["uwuhere", squash(title), squash(code)].filter((word) => word.length >= 4);
-  if (own.some((word) => plain.includes(word))) {
+  const ownWords = ["uwuhere", squash(title), squash(code)].filter((word) => {
+    return word.length >= 4;
+  });
+  const containsOwnWord = ownWords.some((word) => {
+    return squashedPassword.includes(word);
+  });
+  if (containsOwnWord) {
     throw new HttpError(422, "Leave the event's name and code out of its password.", "weak-password");
   }
 
@@ -80,17 +91,22 @@ export async function checkHostPassword(input, { title = "", code = "" } = {}) {
   return password;
 }
 
+// Whether the password is in Have I Been Pwned's list of breached passwords.
+// Sends only the first five characters of its SHA-1, and looks for the rest
+// among the answers. Answers false when the service cannot be reached.
 async function isBreached(password) {
-  const sha1 = createHash("sha1").update(password, "utf8").digest("hex").toUpperCase();
-  const prefix = sha1.slice(0, 5);
-  const suffix = sha1.slice(5);
+  const passwordHash = createHash("sha1").update(password, "utf8").digest("hex").toUpperCase();
+  const prefix = passwordHash.slice(0, 5);
+  const suffix = passwordHash.slice(5);
 
   try {
     const response = await fetch(`https://api.pwnedpasswords.com/range/${prefix}`, {
       headers: { "User-Agent": "uwuHere (here.uwuapps.org)", "Add-Padding": "true" },
       signal: AbortSignal.timeout(3000),
     });
-    if (!response.ok) throw new Error(`HIBP answered ${response.status}`);
+    if (!response.ok) {
+      throw new Error(`HIBP answered ${response.status}`);
+    }
 
     const body = await response.text();
     return body.split("\n").some((line) => {
@@ -99,7 +115,11 @@ async function isBreached(password) {
       return hash === suffix && Number(count) > 0;
     });
   } catch (cause) {
-    console.warn("[uwuhere] breach check skipped:", cause?.message ?? cause);
+    let reason = cause;
+    if (cause !== null && cause !== undefined && cause.message !== null && cause.message !== undefined) {
+      reason = cause.message;
+    }
+    console.warn("[uwuhere] breach check skipped:", reason);
     return false;
   }
 }

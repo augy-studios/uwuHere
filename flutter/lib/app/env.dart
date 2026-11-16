@@ -8,18 +8,33 @@ class Env {
   static bool? desktopOverride;
 
   /// The Windows, macOS and Linux apps: mouse and keyboard, dialogs and drawers.
-  static bool get desktop =>
-      desktopOverride ??
-      (!kIsWeb &&
-          (defaultTargetPlatform == TargetPlatform.windows || defaultTargetPlatform == TargetPlatform.macOS || defaultTargetPlatform == TargetPlatform.linux));
+  static bool get desktop {
+    final override = desktopOverride;
+    if (override != null) return override;
+    return !kIsWeb &&
+        (defaultTargetPlatform == TargetPlatform.windows || defaultTargetPlatform == TargetPlatform.macOS || defaultTargetPlatform == TargetPlatform.linux);
+  }
 
   /// For the Playwright suite's browser build: draw as the Android app does.
   static bool? androidOverride;
 
-  static bool get android => androidOverride ?? (!kIsWeb && defaultTargetPlatform == TargetPlatform.android);
-  static bool get macOS => !kIsWeb && defaultTargetPlatform == TargetPlatform.macOS;
-  static bool get windows => !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
-  static bool get linux => !kIsWeb && defaultTargetPlatform == TargetPlatform.linux;
+  static bool get android {
+    final override = androidOverride;
+    if (override != null) return override;
+    return !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+  }
+
+  static bool get macOS {
+    return !kIsWeb && defaultTargetPlatform == TargetPlatform.macOS;
+  }
+
+  static bool get windows {
+    return !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
+  }
+
+  static bool get linux {
+    return !kIsWeb && defaultTargetPlatform == TargetPlatform.linux;
+  }
 
   /// The app's version, as pubspec.yaml has it. Set as the app opens.
   static String version = '';

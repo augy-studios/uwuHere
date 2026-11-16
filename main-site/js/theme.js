@@ -18,13 +18,21 @@ export const COLOR_THEMES = [
 const STORAGE_KEY_COLOR = `${APP_KEY}.colorTheme`;
 const STORAGE_KEY_MODE = `${APP_KEY}.mode`;
 
-function hexToRgb(hex) {
-  const n = parseInt(hex.replace("#", ""), 16);
-  return `${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}`;
+// "#ccffcc" as "204, 255, 204": the red, green and blue channels for CSS rgba().
+function hexToRedGreenBlueText(hex) {
+  const colourNumber = parseInt(hex.replace("#", ""), 16);
+  const red = (colourNumber >> 16) & 255;
+  const green = (colourNumber >> 8) & 255;
+  const blue = colourNumber & 255;
+  return `${red}, ${green}, ${blue}`;
 }
 
 export function getStoredColorTheme() {
-  return localStorage.getItem(STORAGE_KEY_COLOR) || "classic";
+  const storedTheme = localStorage.getItem(STORAGE_KEY_COLOR);
+  if (storedTheme) {
+    return storedTheme;
+  }
+  return "classic";
 }
 
 /* Mode preference and mode are different things. The preference is what the
@@ -40,8 +48,11 @@ export const LIGHT_FROM_HOUR = 9;
 export const LIGHT_UNTIL_HOUR = 18;
 
 export function getModePreference() {
-  const v = localStorage.getItem(STORAGE_KEY_MODE);
-  return MODE_PREFERENCES.includes(v) ? v : "light";
+  const storedPreference = localStorage.getItem(STORAGE_KEY_MODE);
+  if (MODE_PREFERENCES.includes(storedPreference)) {
+    return storedPreference;
+  }
+  return "light";
 }
 
 export function isDaylightHours(now = new Date()) {
@@ -50,8 +61,16 @@ export function isDaylightHours(now = new Date()) {
 }
 
 export function resolveMode(preference) {
-  if (preference === "time") return isDaylightHours() ? "light" : "dark";
-  return preference === "dark" ? "dark" : "light";
+  if (preference === "time") {
+    if (isDaylightHours()) {
+      return "light";
+    }
+    return "dark";
+  }
+  if (preference === "dark") {
+    return "dark";
+  }
+  return "light";
 }
 
 // The mode the document is in right now, resolved. What the theme button
@@ -61,13 +80,20 @@ export function getStoredMode() {
 }
 
 export function applyColorTheme(id) {
-  const theme = COLOR_THEMES.find((t) => t.id === id) || COLOR_THEMES[0];
+  let theme = COLOR_THEMES.find((candidate) => {
+    return candidate.id === id;
+  });
+  if (!theme) {
+    theme = COLOR_THEMES[0];
+  }
   document.documentElement.setAttribute("data-color-theme", theme.id);
   document.documentElement.style.setProperty("--brand", theme.hex);
-  document.documentElement.style.setProperty("--brand-rgb", hexToRgb(theme.hex));
+  document.documentElement.style.setProperty("--brand-rgb", hexToRedGreenBlueText(theme.hex));
   localStorage.setItem(STORAGE_KEY_COLOR, theme.id);
   const meta = document.querySelector('meta[name="theme-color"]');
-  if (meta) meta.setAttribute("content", theme.hex);
+  if (meta) {
+    meta.setAttribute("content", theme.hex);
+  }
   document.dispatchEvent(
     new CustomEvent("uwu:colorchange", { detail: { theme: theme.id } })
   );
@@ -75,7 +101,10 @@ export function applyColorTheme(id) {
 }
 
 export function applyMode(preference) {
-  const chosen = MODE_PREFERENCES.includes(preference) ? preference : "light";
+  let chosen = "light";
+  if (MODE_PREFERENCES.includes(preference)) {
+    chosen = preference;
+  }
   const resolved = resolveMode(chosen);
 
   document.documentElement.setAttribute("data-mode", resolved);
@@ -93,7 +122,7 @@ let modeTimer = null;
 let watchingVisibility = false;
 
 // Milliseconds until the next 09:00 or 18:00, whichever comes first.
-function msUntilNextBoundary(now = new Date()) {
+function millisecondsUntilNextBoundary(now = new Date()) {
   const next = new Date(now);
   next.setMinutes(0, 0, 0);
 
@@ -118,23 +147,29 @@ function scheduleModeCheck() {
     modeTimer = null;
   }
 
-  if (getModePreference() !== "time") return;
+  if (getModePreference() !== "time") {
+    return;
+  }
 
   modeTimer = setTimeout(() => {
     modeTimer = null;
     refreshTimeMode();
-  }, msUntilNextBoundary());
+  }, millisecondsUntilNextBoundary());
 
   if (!watchingVisibility && typeof document !== "undefined") {
     watchingVisibility = true;
     document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "visible") refreshTimeMode();
+      if (document.visibilityState === "visible") {
+        refreshTimeMode();
+      }
     });
   }
 }
 
 export function refreshTimeMode() {
-  if (getModePreference() !== "time") return;
+  if (getModePreference() !== "time") {
+    return;
+  }
 
   const resolved = resolveMode("time");
   const current = document.documentElement.getAttribute("data-mode");
