@@ -15,3 +15,7 @@ key.properties
 
 # The watch module's build (wear/README.md).
 /wear/build/
+
+# Gradle's problems report (build/reports/problems/problems-report.html), written by every
+# Android build. Flutter puts the build itself in flutter/build/, so this is all that lands here.
+/build/
