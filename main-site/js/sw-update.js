@@ -11,17 +11,22 @@ import { escapeHtml } from "./ui.js";
 import { trackBanner } from "./tray.js";
 import { AppBridge } from "./app-bridge.js";
 
-const SW_URL = "/sw.js";
+const SERVICE_WORKER_URL = "/sw.js";
 
+// The words on the bar for each kind of update.
 const COPY = {
   site: {
     label: "Update",
-    ready: () => "A new version of uwuHere is ready.",
+    ready: () => {
+      return "A new version of uwuHere is ready.";
+    },
     primary: "Reload",
   },
   app: {
     label: "App update",
-    ready: (version) => `Version ${version} of the uwuHere app is out.`,
+    ready: (version) => {
+      return `Version ${version} of the uwuHere app is out.`;
+    },
     primary: "Update",
   },
   later: "Not now",
@@ -37,30 +42,50 @@ let dismissed = false;
 let appUpdate = null;
 let appDismissed = false;
 
+// Which update the bar should show right now: "site", "app", or null for none.
 function showing() {
-  if (waitingWorker && !dismissed) return "site";
-  if (appUpdate && !appDismissed) return "app";
+  if (waitingWorker && !dismissed) {
+    return "site";
+  }
+  if (appUpdate && !appDismissed) {
+    return "app";
+  }
   return null;
 }
 
+// Draws the update bar for whichever update is showing, or takes it away when
+// there is none. Re-run whenever anything about the updates changes.
 function render() {
   const existing = document.querySelector(".update-notice");
   const kind = showing();
 
   if (!kind) {
-    existing?.remove();
+    if (existing !== null && existing !== undefined) {
+      existing.remove();
+    }
     trackBanner(null);
     return;
   }
 
   const copy = COPY[kind];
-  const bar = existing ?? document.createElement("div");
+  let bar;
+  if (existing === null || existing === undefined) {
+    bar = document.createElement("div");
+  } else {
+    bar = existing;
+  }
+
+  let appVersion;
+  if (appUpdate !== null && appUpdate !== undefined) {
+    appVersion = appUpdate.version;
+  }
+
   bar.className = "update-notice";
   bar.setAttribute("role", "status");
   bar.setAttribute("aria-label", copy.label);
   bar.innerHTML = `
     <div class="update-notice-inner">
-      <p>${escapeHtml(copy.ready(appUpdate?.version))}</p>
+      <p>${escapeHtml(copy.ready(appVersion))}</p>
       <button type="button" class="btn btn-primary" data-sw-update>
         ${escapeHtml(copy.primary)}
       </button>
@@ -79,14 +104,19 @@ function render() {
     }
     // The only place anything asks for skipWaiting. The reload happens on
     // controllerchange, not here.
-    waitingWorker?.postMessage("skip-waiting");
+    if (waitingWorker !== null && waitingWorker !== undefined) {
+      waitingWorker.postMessage("skip-waiting");
+    }
   });
 
   bar.querySelector("[data-sw-later]").addEventListener("click", () => {
     // This page view only. Persisting it would mean somebody who dismisses
     // once never hears about an update again.
-    if (kind === "app") appDismissed = true;
-    else dismissed = true;
+    if (kind === "app") {
+      appDismissed = true;
+    } else {
+      dismissed = true;
+    }
     render();
   });
 
@@ -98,7 +128,9 @@ function render() {
 
 /** A newer Android app is out (js/app-update.js). */
 export function offerAppUpdate(latest) {
-  if (appUpdate?.version === latest.version) return;
+  if (appUpdate !== null && appUpdate !== undefined && appUpdate.version === latest.version) {
+    return;
+  }
   appUpdate = latest;
   render();
 }
@@ -109,11 +141,18 @@ export function offerAppUpdate(latest) {
  * bar as usual, once it has installed.
  */
 export function checkSiteUpdate() {
-  return registration ? registration.update().catch(() => {}) : Promise.resolve();
+  if (registration) {
+    return registration.update().catch(() => {});
+  }
+  return Promise.resolve();
 }
 
+// Shows the bar for a new worker that is already waiting, or that finishes
+// installing while the page is open.
 function watchForUpdate() {
-  if (!registration) return;
+  if (!registration) {
+    return;
+  }
 
   // A worker already waiting when the page opened. This is the ordinary case
   // on the second page view after a deploy, and without it the prompt would
@@ -126,14 +165,20 @@ function watchForUpdate() {
 
   registration.addEventListener("updatefound", () => {
     const installing = registration.installing;
-    if (!installing) return;
+    if (!installing) {
+      return;
+    }
 
     installing.addEventListener("statechange", () => {
       // `installed` with a controller present means an update. `installed`
       // with no controller is a first install, which has nothing to prompt
       // about: there is no previous version on screen to protect.
       if (installing.state === "installed" && navigator.serviceWorker.controller) {
-        waitingWorker = registration.waiting ?? installing;
+        if (registration.waiting === null || registration.waiting === undefined) {
+          waitingWorker = installing;
+        } else {
+          waitingWorker = registration.waiting;
+        }
         render();
       }
     });
@@ -144,10 +189,12 @@ function watchForUpdate() {
 // can be hours. Asking explicitly is what turns "a new version is on the
 // server" into "the bar is on screen": on returning to the tab, and on a slow
 // interval for a host page left open all day.
-const UPDATE_INTERVAL_MS = 30 * 60 * 1000;
+const UPDATE_CHECK_INTERVAL_MILLISECONDS = 30 * 60 * 1000;
 
 function checkForUpdate() {
-  if (!registration || !navigator.onLine || document.visibilityState !== "visible") return;
+  if (!registration || !navigator.onLine || document.visibilityState !== "visible") {
+    return;
+  }
   registration.update().catch(() => {
     // A failed check is not worth reporting: the next one will do.
   });
@@ -155,19 +202,25 @@ function checkForUpdate() {
 
 function watchForNewDeploys() {
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible") checkForUpdate();
+    if (document.visibilityState === "visible") {
+      checkForUpdate();
+    }
   });
   window.addEventListener("online", checkForUpdate);
-  setInterval(checkForUpdate, UPDATE_INTERVAL_MS);
+  setInterval(checkForUpdate, UPDATE_CHECK_INTERVAL_MILLISECONDS);
 }
 
+// Registers the service worker, starts watching it for updates, and reloads
+// the page once a waiting worker has taken over.
 function registerWorker() {
-  if (!("serviceWorker" in navigator)) return;
+  if (!("serviceWorker" in navigator)) {
+    return;
+  }
 
   navigator.serviceWorker
-    .register(SW_URL)
-    .then((reg) => {
-      registration = reg;
+    .register(SERVICE_WORKER_URL)
+    .then((newRegistration) => {
+      registration = newRegistration;
       watchForUpdate();
       watchForNewDeploys();
     })
@@ -183,7 +236,9 @@ function registerWorker() {
   // the controller has changed by this point, so the reload is served by the
   // new worker and not the one being replaced.
   navigator.serviceWorker.addEventListener("controllerchange", () => {
-    if (reloading) return;
+    if (reloading) {
+      return;
+    }
     reloading = true;
     window.location.reload();
   });
@@ -194,6 +249,9 @@ export function initUpdateBar() {
   // the worker precaches, and starting that while the page is still fetching
   // its own assets is how a service worker makes a first visit slower for no
   // gain.
-  if (document.readyState === "complete") registerWorker();
-  else window.addEventListener("load", registerWorker, { once: true });
+  if (document.readyState === "complete") {
+    registerWorker();
+  } else {
+    window.addEventListener("load", registerWorker, { once: true });
+  }
 }

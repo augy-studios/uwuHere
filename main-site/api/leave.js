@@ -8,7 +8,7 @@
    Once only: the update matches rows that have not left yet. No proximity
    check, because saying you left early is never in your own favour. */
 
-import { endpoint, ok, readBody, dbError, HttpError } from "./_lib/http.js";
+import { endpoint, ok, readBody, databaseError, HttpError } from "./_lib/http.js";
 import { rest } from "./_lib/supabase.js";
 import { hashDevice } from "./_lib/auth.js";
 import { requireEvent, findAttendeeByDevice, publicAttendee } from "./_lib/events.js";
@@ -34,7 +34,7 @@ export default endpoint(["POST"], async (req, res) => {
     prefer: "return=representation",
     body: { left_early_at: new Date().toISOString() },
   });
-  if (!result.ok) throw dbError(result);
+  if (!result.ok) throw databaseError(result);
 
   const updated = result.data?.[0];
   if (updated) {

@@ -135,7 +135,7 @@ Future<void> desktopAfterApp(List<String> args) async {
   Runner.onDock = (code) => Desktop.show('uwu://here/host?id=$code');
   // The taskbar's thumbnail buttons: refresh what's on show where it is, or the event before or
   // after the open one.
-  Runner.onThumb = (what) {
+  Runner.onThumbnailButton = (what) {
     switch (what) {
       case 'toggle':
         Glance.refreshTray();
@@ -173,9 +173,9 @@ Future<void> desktopAfterApp(List<String> args) async {
     await Desktop.firstShow();
   };
 
-  await DeskNotify.init();
+  await DeskNotify.initialize();
   await Desktop.firstShow();
-  unawaited(DeskTray.I.start());
+  unawaited(DeskTray.instance.start());
   Glance.start();
   AlertsPoll.start();
   unawaited(DeskWidgets.reopenAll());

@@ -15,16 +15,17 @@ import '../data/geo.dart';
 class LinuxLocation {
   LinuxLocation._();
 
-  static Position2? _last;
-  static DateTime? _at;
+  static Position2? _lastPosition;
+  static DateTime? _lastFoundAt;
 
+  /// Where this computer is, from the Wi-Fi networks around it, or null when it can't be told.
   static Future<Position2?> find() async {
     if (!Platform.isLinux) return null;
-    final at = _at;
-    if (_last != null && at != null && DateTime.now().difference(at) < const Duration(seconds: 4)) return _last;
+    final lastFoundAt = _lastFoundAt;
+    if (_lastPosition != null && lastFoundAt != null && DateTime.now().difference(lastFoundAt) < const Duration(seconds: 4)) return _lastPosition;
     try {
-      final g = await Process.run('gsettings', ['get', 'org.gnome.system.location', 'enabled']);
-      if ('${g.stdout}'.trim() == 'false') {
+      final gsettingsResult = await Process.run('gsettings', ['get', 'org.gnome.system.location', 'enabled']);
+      if ('${gsettingsResult.stdout}'.trim() == 'false') {
         throw GeoError('Location Services are off. Turn them on in Settings, Privacy, Location, then try again.');
       }
     } on GeoError {
@@ -32,35 +33,49 @@ class LinuxLocation {
     } catch (_) {
       // Not GNOME: carry on.
     }
-    final r = await Process.run('nmcli', ['-t', '-f', 'SSID,BSSID,SIGNAL,FREQ', 'dev', 'wifi', 'list', '--rescan', 'auto']);
-    if (r.exitCode != 0) return null;
-    final aps = <Map<String, Object>>[];
-    for (final line in '${r.stdout}'.split('\n')) {
+    final nmcliResult = await Process.run('nmcli', ['-t', '-f', 'SSID,BSSID,SIGNAL,FREQ', 'dev', 'wifi', 'list', '--rescan', 'auto']);
+    if (nmcliResult.exitCode != 0) return null;
+    final accessPoints = <Map<String, Object>>[];
+    for (final line in '${nmcliResult.stdout}'.split('\n')) {
       // Fields are split by unescaped colons; the BSSID's own are escaped as \:.
-      final parts = line.replaceAll(r'\:', '\u0000').split(':').map((p) => p.replaceAll('\u0000', ':')).toList();
+      final parts = line.replaceAll(r'\:', '\u0000').split(':').map((part) {
+        return part.replaceAll('\u0000', ':');
+      }).toList();
       if (parts.length < 4) continue;
-      final ssid = parts[0];
-      if (ssid.endsWith('_nomap')) continue;
-      final signal = int.tryParse(parts[2]) ?? 0;
-      final freq = int.tryParse(parts[3].replaceAll(RegExp(r'\D'), '')) ?? 0;
-      aps.add({'macAddress': parts[1].toLowerCase(), 'signalStrength': signal ~/ 2 - 100, 'frequency': freq});
+      final networkName = parts[0];
+      if (networkName.endsWith('_nomap')) continue;
+      int signal = 0;
+      final parsedSignal = int.tryParse(parts[2]);
+      if (parsedSignal != null) signal = parsedSignal;
+      int frequency = 0;
+      final parsedFrequency = int.tryParse(parts[3].replaceAll(RegExp(r'\D'), ''));
+      if (parsedFrequency != null) frequency = parsedFrequency;
+      accessPoints.add({'macAddress': parts[1].toLowerCase(), 'signalStrength': signal ~/ 2 - 100, 'frequency': frequency});
     }
-    aps.sort((a, b) => (b['signalStrength'] as int).compareTo(a['signalStrength'] as int));
-    if (aps.isEmpty) return null;
-    final res = await http
+    // Strongest first.
+    accessPoints.sort((first, second) {
+      return (second['signalStrength'] as int).compareTo(first['signalStrength'] as int);
+    });
+    if (accessPoints.isEmpty) return null;
+    final response = await http
         .post(
           Uri.parse('https://api.beacondb.net/v1/geolocate'),
           headers: {'Content-Type': 'application/json', 'User-Agent': 'uwuHere desktop'},
-          body: jsonEncode({'considerIp': true, 'wifiAccessPoints': aps.take(40).toList()}),
+          body: jsonEncode({'considerIp': true, 'wifiAccessPoints': accessPoints.take(40).toList()}),
         )
         .timeout(const Duration(seconds: 15));
-    if (res.statusCode != 200) return null;
-    final v = jsonDecode(res.body);
-    final loc = v is Map ? v['location'] : null;
-    final acc = v is Map ? (v['accuracy'] as num?)?.toDouble() : null;
-    if (loc is! Map || acc == null || acc > 3000) return null;
-    _last = Position2((loc['lat'] as num).toDouble(), (loc['lng'] as num).toDouble(), acc);
-    _at = DateTime.now();
-    return _last;
+    if (response.statusCode != 200) return null;
+    final decoded = jsonDecode(response.body);
+    Object? location;
+    double? accuracy;
+    if (decoded is Map) {
+      location = decoded['location'];
+      final accuracyNumber = decoded['accuracy'] as num?;
+      if (accuracyNumber != null) accuracy = accuracyNumber.toDouble();
+    }
+    if (location is! Map || accuracy == null || accuracy > 3000) return null;
+    _lastPosition = Position2((location['lat'] as num).toDouble(), (location['lng'] as num).toDouble(), accuracy);
+    _lastFoundAt = DateTime.now();
+    return _lastPosition;
   }
 }

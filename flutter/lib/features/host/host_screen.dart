@@ -253,7 +253,7 @@ class _ShareCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final col = UwuColors.of(context);
     final ended = c.ended;
-    final rows = [c.p2pRow, c.tapRow, c.btRow, c.hotspotRow].whereType<StatusRow>().toList();
+    final rows = [c.p2pRow, c.tapRow, c.bluetoothRow, c.hotspotRow].whereType<StatusRow>().toList();
     final sync = c.syncBanner;
     return Card2(
       title: c.title.isEmpty ? 'Untitled event' : c.title,

@@ -20,15 +20,24 @@ import 'widgets_window.dart';
 
 class DeskTray with TrayListener {
   DeskTray._();
-  static final DeskTray I = DeskTray._();
+  static final DeskTray instance = DeskTray._();
 
   /// Set by desktop_main.dart: opens Make it yours again.
   static Future<void> Function()? openWelcome;
 
-  bool _login = false;
+  /// Whether the app starts when the user signs in, as the menu's check box shows it.
+  bool _startsAtLogin = false;
 
+  /// Puts the icon in the tray, and rebuilds the menu whenever the glance or an update changes.
   Future<void> start() async {
-    final icon = Platform.isWindows ? 'assets/images/tray.ico' : (Platform.isMacOS ? 'assets/images/tray_template.png' : 'assets/images/tray.png');
+    String icon;
+    if (Platform.isWindows) {
+      icon = 'assets/images/tray.ico';
+    } else if (Platform.isMacOS) {
+      icon = 'assets/images/tray_template.png';
+    } else {
+      icon = 'assets/images/tray.png';
+    }
     await trayManager.setIcon(icon, isTemplate: Platform.isMacOS);
     await trayManager.setToolTip(Desktop.name);
     trayManager.addListener(this);
@@ -40,31 +49,68 @@ class DeskTray with TrayListener {
     Updater.available.addListener(rebuild);
     Updater.ready.addListener(rebuild);
     Updater.checking.addListener(rebuild);
-    _login = await Desktop.startsAtLogin();
+    _startsAtLogin = await Desktop.startsAtLogin();
     await rebuild();
   }
 
+  /// Sets the tray's menu afresh from what's true now (see the list at the top of this file).
   Future<void> rebuild() async {
     final ready = Updater.ready.value;
     final available = Updater.available.value;
     final followed = Glance.followed.value;
     final checking = Updater.checking.value;
+    String checkLabel;
+    if (checking) {
+      checkLabel = 'Checking for updates...';
+    } else {
+      checkLabel = 'Check for updates...';
+    }
     await trayManager.setContextMenu(
       Menu(
         items: [
           if (ready != null) ...[
-            MenuItem(key: 'restart', label: 'Restart to update to $ready', onClick: (_) => Updater.restartToUpdate()),
+            MenuItem(
+              key: 'restart',
+              label: 'Restart to update to $ready',
+              onClick: (_) {
+                Updater.restartToUpdate();
+              },
+            ),
             MenuItem.separator(),
           ] else if (available != null && !Updater.canInstall) ...[
-            MenuItem(key: 'download', label: 'Download version $available', onClick: (_) => Desktop.openExternal(Desktop.releases)),
+            MenuItem(
+              key: 'download',
+              label: 'Download version $available',
+              onClick: (_) {
+                Desktop.openExternal(Desktop.releases);
+              },
+            ),
             MenuItem.separator(),
           ],
           if (followed != null) ...[
-            MenuItem(key: 'glance', label: 'Tray glance: ${followed['name']}', onClick: (_) => Desktop.show('uwu://here/host?id=${followed['code']}')),
-            MenuItem(key: 'stop', label: 'Stop the tray glance', onClick: (_) => Glance.follow(null)),
+            MenuItem(
+              key: 'glance',
+              label: 'Tray glance: ${followed['name']}',
+              onClick: (_) {
+                Desktop.show('uwu://here/host?id=${followed['code']}');
+              },
+            ),
+            MenuItem(
+              key: 'stop',
+              label: 'Stop the tray glance',
+              onClick: (_) {
+                Glance.follow(null);
+              },
+            ),
             MenuItem.separator(),
           ],
-          MenuItem(key: 'open', label: 'Open ${Desktop.name}', onClick: (_) => Desktop.show()),
+          MenuItem(
+            key: 'open',
+            label: 'Open ${Desktop.name}',
+            onClick: (_) {
+              Desktop.show();
+            },
+          ),
           MenuItem(
             key: 'join',
             label: 'Check in with a code',
@@ -82,22 +128,48 @@ class DeskTray with TrayListener {
             },
           ),
           MenuItem.separator(),
-          MenuItem(key: 'widget', label: 'Add a widget', onClick: (_) => DeskWidgets.add()),
-          MenuItem(key: 'welcome', label: 'Make it yours...', onClick: (_) => openWelcome?.call()),
+          MenuItem(
+            key: 'widget',
+            label: 'Add a widget',
+            onClick: (_) {
+              DeskWidgets.add();
+            },
+          ),
+          MenuItem(
+            key: 'welcome',
+            label: 'Make it yours...',
+            onClick: (_) {
+              final openWelcomeAgain = openWelcome;
+              if (openWelcomeAgain != null) openWelcomeAgain();
+            },
+          ),
           MenuItem.separator(),
-          MenuItem(key: 'check', label: checking ? 'Checking for updates...' : 'Check for updates...', disabled: checking, onClick: (_) => Updater.checkNow()),
+          MenuItem(
+            key: 'check',
+            label: checkLabel,
+            disabled: checking,
+            onClick: (_) {
+              Updater.checkNow();
+            },
+          ),
           MenuItem.checkbox(
             key: 'login',
             label: 'Start when I sign in',
-            checked: _login,
+            checked: _startsAtLogin,
             onClick: (_) async {
-              _login = !_login;
-              await Desktop.setStartAtLogin(_login);
+              _startsAtLogin = !_startsAtLogin;
+              await Desktop.setStartAtLogin(_startsAtLogin);
               rebuild();
             },
           ),
           MenuItem.separator(),
-          MenuItem(key: 'quit', label: 'Quit', onClick: (_) => Desktop.quit()),
+          MenuItem(
+            key: 'quit',
+            label: 'Quit',
+            onClick: (_) {
+              Desktop.quit();
+            },
+          ),
         ],
       ),
     );
@@ -115,12 +187,14 @@ class DeskTray with TrayListener {
 
   @override
   void onTrayIconRightMouseDown() {
-    Desktop.startsAtLogin().then((on) {
-      _login = on;
+    Desktop.startsAtLogin().then((startsAtLogin) {
+      _startsAtLogin = startsAtLogin;
       // On Windows a tray menu only closes on a click elsewhere if the app is the foreground
       // window as it opens (TrackPopupMenu's rule); this doesn't show a hidden window.
-      // ignore: deprecated_member_use
-      rebuild().then((_) => trayManager.popUpContextMenu(bringAppToFront: Platform.isWindows));
+      rebuild().then((_) {
+        // ignore: deprecated_member_use
+        trayManager.popUpContextMenu(bringAppToFront: Platform.isWindows);
+      });
     });
   }
 }

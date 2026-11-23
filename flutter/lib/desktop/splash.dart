@@ -30,55 +30,76 @@ class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
 
   @override
-  State<SplashScreen> createState() => _SplashScreenState();
+  State<SplashScreen> createState() {
+    return _SplashScreenState();
+  }
 }
 
 class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderStateMixin {
-  late final _bob = AnimationController(vsync: this, duration: const Duration(milliseconds: 1600))..repeat(reverse: true);
+  late final _bobController = AnimationController(vsync: this, duration: const Duration(milliseconds: 1600))..repeat(reverse: true);
 
   @override
   void dispose() {
-    _bob.dispose();
+    _bobController.dispose();
     super.dispose();
   }
 
+  /// The bar's fill from 0 to 1, or null for a bar that can't tell how far along it is (-1).
+  double? _barValue(int percent) {
+    if (percent < 0) {
+      return null;
+    }
+    return percent / 100;
+  }
+
+  /// The update window: the bobbing icon, the status line and its detail, the progress bar and
+  /// Later, all following Updater.splash.
   @override
   Widget build(BuildContext context) {
-    final s = Theme.of(context).colorScheme;
-    final still = MediaQuery.disableAnimationsOf(context);
+    final colors = Theme.of(context).colorScheme;
+    final reduceMotion = MediaQuery.disableAnimationsOf(context);
     return Scaffold(
-      backgroundColor: s.surface,
+      backgroundColor: colors.surface,
       body: DragToMoveArea(
         child: SizedBox.expand(
           child: ValueListenableBuilder<SplashStatus>(
             valueListenable: Updater.splash,
-            builder: (context, st, _) => Padding(
-              padding: const EdgeInsets.all(28),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  AnimatedBuilder(
-                    animation: _bob,
-                    builder: (context, child) => Transform.translate(offset: Offset(0, still ? 0 : -6 * math.sin(_bob.value * math.pi)), child: child),
-                    child: ClipRRect(borderRadius: BorderRadius.circular(22), child: Image.asset('assets/images/icon-512.png', width: 96, height: 96)),
-                  ),
-                  const SizedBox(height: 28),
-                  Semantics(
-                    liveRegion: true,
-                    child: Text(
-                      st.text,
-                      textAlign: TextAlign.center,
-                      style: TextStyle(fontSize: 17, color: s.onSurface),
+            builder: (context, status, _) {
+              return Padding(
+                padding: const EdgeInsets.all(28),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    AnimatedBuilder(
+                      animation: _bobController,
+                      builder: (context, child) {
+                        // Still under reduced motion; otherwise up to 6 px up and back down.
+                        double verticalOffset = 0;
+                        if (!reduceMotion) {
+                          verticalOffset = -6 * math.sin(_bobController.value * math.pi);
+                        }
+                        return Transform.translate(offset: Offset(0, verticalOffset), child: child);
+                      },
+                      child: ClipRRect(borderRadius: BorderRadius.circular(22), child: Image.asset('assets/images/icon-512.png', width: 96, height: 96)),
                     ),
-                  ),
-                  if (st.detail.isNotEmpty) ...[const SizedBox(height: 4), Text(st.detail, style: TextStyle(fontSize: 13, color: s.onSurfaceVariant))],
-                  const SizedBox(height: 16),
-                  // Material You's wavy bar, as the Android Updates page has it.
-                  if (st.percent != null) WavyProgress(value: st.percent! < 0 ? null : st.percent! / 100, label: st.text),
-                  if (st.later) ...[const SizedBox(height: 14), TextButton(onPressed: Updater.later, child: const Text('Later'))],
-                ],
-              ),
-            ),
+                    const SizedBox(height: 28),
+                    Semantics(
+                      liveRegion: true,
+                      child: Text(
+                        status.text,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(fontSize: 17, color: colors.onSurface),
+                      ),
+                    ),
+                    if (status.detail.isNotEmpty) ...[const SizedBox(height: 4), Text(status.detail, style: TextStyle(fontSize: 13, color: colors.onSurfaceVariant))],
+                    const SizedBox(height: 16),
+                    // Material You's wavy bar, as the Android Updates page has it.
+                    if (status.percent != null) WavyProgress(value: _barValue(status.percent!), label: status.text),
+                    if (status.later) ...[const SizedBox(height: 14), TextButton(onPressed: Updater.later, child: const Text('Later'))],
+                  ],
+                ),
+              );
+            },
           ),
         ),
       ),

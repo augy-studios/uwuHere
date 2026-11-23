@@ -4,7 +4,7 @@
    token. Deletes events ended over 7 days ago and events over 30 days old
    that were never ended; migrations/0002_uwuhere_purge.sql holds the rule. */
 
-import { endpoint, ok, dbError, HttpError } from "../_lib/http.js";
+import { endpoint, ok, databaseError, HttpError } from "../_lib/http.js";
 import { rest } from "../_lib/supabase.js";
 
 export default endpoint(["GET"], async (req, res) => {
@@ -14,7 +14,7 @@ export default endpoint(["GET"], async (req, res) => {
   }
 
   const result = await rest("rpc/uwuhere_purge_events", { method: "POST", body: {} });
-  if (!result.ok) throw dbError(result);
+  if (!result.ok) throw databaseError(result);
 
   console.log(`[uwuhere] purge removed ${result.data} event(s)`);
   return ok(res, { removed: result.data });

@@ -20,14 +20,14 @@ export class HttpError extends Error {
   }
 }
 
-function send(res, status, payload) {
+function sendJson(response, status, payload) {
   // Nothing here is ever cacheable: every answer is about live state.
-  res.setHeader("Cache-Control", "no-store, private");
-  res.status(status).json(payload);
+  response.setHeader("Cache-Control", "no-store, private");
+  response.status(status).json(payload);
 }
 
-export function ok(res, data, status = 200) {
-  send(res, status, { ok: true, data });
+export function ok(response, data, status = 200) {
+  sendJson(response, status, { ok: true, data });
 }
 
 /**
@@ -35,14 +35,14 @@ export function ok(res, data, status = 200) {
  * error handling, so each endpoint is only its own logic.
  */
 export function endpoint(methods, handler) {
-  return async function wrapped(req, res) {
-    if (!methods.includes(req.method)) {
-      res.setHeader("Allow", methods.join(", "));
-      return send(res, 405, { ok: false, error: `Use ${methods.join(" or ")}.`, reason: "method" });
+  return async function wrapped(request, response) {
+    if (!methods.includes(request.method)) {
+      response.setHeader("Allow", methods.join(", "));
+      return sendJson(response, 405, { ok: false, error: `Use ${methods.join(" or ")}.`, reason: "method" });
     }
 
     if (!hasSupabase()) {
-      return send(res, 503, {
+      return sendJson(response, 503, {
         ok: false,
         error: "uwuHere is not configured on this deployment yet.",
         reason: "unconfigured",
@@ -50,41 +50,56 @@ export function endpoint(methods, handler) {
     }
 
     try {
-      await handler(req, res);
+      await handler(request, response);
     } catch (cause) {
       if (cause instanceof HttpError) {
-        return send(res, cause.status, {
+        const payload = {
           ok: false,
           error: cause.message,
           reason: cause.reason,
-          ...(cause.extra ? { data: cause.extra } : {}),
-        });
+        };
+        if (cause.extra) {
+          payload.data = cause.extra;
+        }
+        return sendJson(response, cause.status, payload);
       }
       console.error("[uwuhere] unhandled:", cause);
-      return send(res, 500, { ok: false, error: "Something went wrong. Try again.", reason: "error" });
+      return sendJson(response, 500, { ok: false, error: "Something went wrong. Try again.", reason: "error" });
     }
   };
 }
 
 /** A failed database call, as the error a person sees. */
-export function dbError(result) {
+export function databaseError(result) {
   console.error("[uwuhere] supabase answered", result.status, JSON.stringify(result.data));
   return new HttpError(503, "The attendance service is unavailable right now. Try again.", "db");
 }
 
-export async function readBody(req) {
-  if (req.body && typeof req.body === "object") return req.body;
-  if (typeof req.body === "string") return safeParse(req.body);
+// The request's JSON body as an object: already parsed by Vercel, a string
+// to parse, or read from the stream. Anything that is not a JSON object
+// becomes {}.
+export async function readBody(request) {
+  if (request.body && typeof request.body === "object") {
+    return request.body;
+  }
+  if (typeof request.body === "string") {
+    return parseJsonObject(request.body);
+  }
 
   const chunks = [];
-  for await (const chunk of req) chunks.push(chunk);
-  return safeParse(Buffer.concat(chunks).toString("utf8"));
+  for await (const chunk of request) {
+    chunks.push(chunk);
+  }
+  return parseJsonObject(Buffer.concat(chunks).toString("utf8"));
 }
 
-function safeParse(text) {
+function parseJsonObject(text) {
   try {
     const value = JSON.parse(text);
-    return value && typeof value === "object" ? value : {};
+    if (value && typeof value === "object") {
+      return value;
+    }
+    return {};
   } catch {
     return {};
   }

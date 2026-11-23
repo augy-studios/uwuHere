@@ -32,9 +32,14 @@ class AppPages {
   static final StreamController<String> _changes = StreamController.broadcast();
 
   /// A page switch, after it's happened (the site's `pagechange`).
-  static Stream<String> get changes => _changes.stream;
+  static Stream<String> get changes {
+    return _changes.stream;
+  }
 
-  static String active() => current.value;
+  /// The id of the page on show.
+  static String active() {
+    return current.value;
+  }
 
   static void open(String id) {
     if (!all.contains(id)) return;
@@ -57,12 +62,14 @@ class AppPages {
     joinTap = tap;
     joinCode.value = code;
     // The same event again still counts: the page takes the tap, if there's one.
-    joinOpened.value++;
+    joinOpened.value = joinOpened.value + 1;
     open(join);
   }
 
   /// Something on the page changed that a tour might want (a window opened or closed).
-  static void poke() => _changes.add(current.value);
+  static void poke() {
+    _changes.add(current.value);
+  }
 
   /// Each page's reload (the host page's list, the check-in page's event), for the desktop's
   /// Reload, F5 and the taskbar's Refresh.
@@ -71,8 +78,8 @@ class AppPages {
 
 /// Reloads the page on show, if it has anything to reload.
 Future<void> refreshPage() async {
-  final r = AppPages.refreshers[AppPages.active()];
-  if (r != null) await r();
+  final refresher = AppPages.refreshers[AppPages.active()];
+  if (refresher != null) await refresher();
 }
 
 /// Set by the desktop layer: an event's right-click menu (Open in Split Pane, Pin to Desktop

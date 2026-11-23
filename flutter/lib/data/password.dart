@@ -4,9 +4,11 @@
 // Change all three together.
 import 'format.dart';
 
-const passwordMin = 14;
-const passwordMax = 128;
+const passwordMinimumLength = 14;
+const passwordMaximumLength = 128;
 
+/// Sequences a password mustn't be a stretch of, forwards or backwards: the alphabet, the digits,
+/// and rows and columns of a keyboard.
 const _runs = [
   'abcdefghijklmnopqrstuvwxyz',
   '0123456789',
@@ -19,16 +21,27 @@ const _runs = [
 
 /// Lower case, letters and digits only (the site's NFKC step is left to the server: Dart has no
 /// normaliser, and the checks here are advice).
-String squash(String text) => text.toLowerCase().replaceAll(RegExp(r'[^\p{L}\p{N}]', unicode: true), '');
+String squash(String text) {
+  return text.toLowerCase().replaceAll(RegExp(r'[^\p{L}\p{N}]', unicode: true), '');
+}
 
-bool _isRepeat(String text) => RegExp(r'^(.{1,6}?)\1+.{0,6}$', unicode: true).hasMatch(text);
+/// A short piece said over and over ("abab…", "123123…"), with at most a few characters after.
+bool _isRepeat(String text) {
+  return RegExp(r'^(.{1,6}?)\1+.{0,6}$', unicode: true).hasMatch(text);
+}
 
+/// Whether the text is a stretch of one of [_runs], forwards or backwards, wrapping round its end
+/// ("yzabc" counts).
 bool _isRun(String text) {
-  if (text.length < 4) return false;
+  if (text.length < 4) {
+    return false;
+  }
   for (final run in _runs) {
-    final loop = run * ((text.length * 2 / run.length).ceil() + 2);
-    final back = loop.split('').reversed.join();
-    if (loop.contains(text) || back.contains(text)) return true;
+    final repeatedRun = run * ((text.length * 2 / run.length).ceil() + 2);
+    final reversedRun = repeatedRun.split('').reversed.join();
+    if (repeatedRun.contains(text) || reversedRun.contains(text)) {
+      return true;
+    }
   }
   return false;
 }
@@ -42,20 +55,35 @@ class PasswordCheck {
 class PasswordResult {
   const PasswordResult(this.checks);
   final List<PasswordCheck> checks;
-  bool get ok => checks.every((c) => c.ok);
+  bool get ok {
+    return checks.every((check) {
+      return check.ok;
+    });
+  }
 }
 
+/// The checklist's three lines for a password as typed so far: its length, no repeat or run, and
+/// none of the event's own words in it.
 PasswordResult checkPassword(String password, {String title = '', String code = ''}) {
   final length = charCount(password);
   final plain = squash(password);
-  final own = ['uwuhere', squash(title), squash(code)].where((w) => w.length >= 4).toList();
+  final ownWords = ['uwuhere', squash(title), squash(code)].where((word) {
+    return word.length >= 4;
+  }).toList();
   final typed = length > 0;
+
+  String lengthText;
+  if (length > passwordMaximumLength) {
+    lengthText = 'At most $passwordMaximumLength characters';
+  } else if (length < passwordMinimumLength) {
+    lengthText = '$passwordMinimumLength characters or more ($length so far)';
+  } else {
+    lengthText = '$passwordMinimumLength characters or more';
+  }
+
   return PasswordResult([
-    PasswordCheck(
-      length >= passwordMin && length <= passwordMax,
-      length > passwordMax ? 'At most $passwordMax characters' : '$passwordMin characters or more${length < passwordMin ? ' ($length so far)' : ''}',
-    ),
+    PasswordCheck(length >= passwordMinimumLength && length <= passwordMaximumLength, lengthText),
     PasswordCheck(typed && !_isRepeat(plain) && !_isRun(plain), 'Not a repeat or a run like 12345 or qwerty'),
-    PasswordCheck(typed && !own.any(plain.contains), "Leaves out the event's name and code"),
+    PasswordCheck(typed && !ownWords.any(plain.contains), "Leaves out the event's name and code"),
   ]);
 }

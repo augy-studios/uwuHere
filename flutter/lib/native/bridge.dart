@@ -24,15 +24,25 @@ class NativeError implements Exception {
   final Map<String, dynamic>? data;
 
   @override
-  String toString() => code == null ? message : '$message ($code)';
+  String toString() {
+    if (code == null) {
+      return message;
+    }
+    return '$message ($code)';
+  }
 }
 
+/// One listener added with [Native.on]; [cancel] stops it.
 class NativeListener {
-  NativeListener._(this._key, this._fn);
-  final String _key;
-  final void Function(Map<String, dynamic>) _fn;
+  NativeListener._(this._key, this._callback);
 
-  void cancel() => Native._remove(this);
+  /// "plugin.event".
+  final String _key;
+  final void Function(Map<String, dynamic>) _callback;
+
+  void cancel() {
+    Native._remove(this);
+  }
 }
 
 /// Stands in for platform code: the desktop's host, or a fake in tests and screenshots.
@@ -54,16 +64,24 @@ class Native {
   /// Whether there's anything behind the bridge at all.
   static bool available = true;
 
+  /// Connects the bridge once: to the Android channel (with events coming back through [emit]),
+  /// or to the Dart [host]; then asks the App plugin what this build can do.
   static Future<void> start() async {
     if (_started) return;
     _started = true;
-    final android = !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
-    if (host == null && !android) available = false;
+    final isAndroid = !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+    if (host == null && !isAndroid) {
+      available = false;
+    }
     if (host == null && available) {
-      _channel.setMethodCallHandler((call) async {
-        if (call.method != 'event') return null;
-        final args = Map<String, dynamic>.from(call.arguments as Map);
-        emit('${args['plugin']}', '${args['event']}', _decode(args['data'] as String?) ?? <String, dynamic>{});
+      _channel.setMethodCallHandler((methodCall) async {
+        if (methodCall.method != 'event') return null;
+        final callArguments = Map<String, dynamic>.from(methodCall.arguments as Map);
+        var eventData = _decode(callArguments['data'] as String?);
+        if (eventData == null) {
+          eventData = <String, dynamic>{};
+        }
+        emit('${callArguments['plugin']}', '${callArguments['event']}', eventData);
         return null;
       });
       try {
@@ -75,7 +93,9 @@ class Native {
       }
     }
     try {
-      if (available) _info = await call('App', 'info');
+      if (available) {
+        _info = await call('App', 'info');
+      }
     } catch (_) {
       _info = null;
     }
@@ -93,22 +113,68 @@ class Native {
 
   /// What this build and device can do, as the App plugin lists it. The only switch features
   /// use to show a native-only button.
-  static bool has(String feature) => ((_info?['features'] as List?) ?? const []).contains(feature);
-  static Map<String, dynamic>? get info => _info;
-  static String? get version => _info?['version'] as String?;
+  static bool has(String feature) {
+    final info = _info;
+    List? features;
+    if (info != null) {
+      features = info['features'] as List?;
+    }
+    if (features == null) {
+      return false;
+    }
+    return features.contains(feature);
+  }
+
+  static Map<String, dynamic>? get info {
+    return _info;
+  }
+
+  static String? get version {
+    final info = _info;
+    if (info == null) {
+      return null;
+    }
+    return info['version'] as String?;
+  }
 
   /// 'android', 'desktop', or null where there's no native side.
-  static String? get platform => _info?['platform'] as String?;
+  static String? get platform {
+    final info = _info;
+    if (info == null) {
+      return null;
+    }
+    return info['platform'] as String?;
+  }
 
+  /// Calls one method of one plugin, through the Dart [host] if there is one, else the channel.
+  /// Throws a [NativeError] when it fails or there's nothing behind the bridge.
   static Future<Map<String, dynamic>?> call(String plugin, String method, [Map<String, dynamic>? options]) async {
     if (!available) throw NativeError('Not in the app', code: 'unavailable');
-    final h = host;
-    if (h != null) return h.call(plugin, method, options ?? const {});
+    final dartHost = host;
+    Map<String, dynamic> givenOptions;
+    if (options == null) {
+      givenOptions = const {};
+    } else {
+      givenOptions = options;
+    }
+    if (dartHost != null) return dartHost.call(plugin, method, givenOptions);
     try {
-      final json = await _channel.invokeMethod<String>('call', {'plugin': plugin, 'method': method, 'options': jsonEncode(options ?? const {})});
+      final json = await _channel.invokeMethod<String>('call', {'plugin': plugin, 'method': method, 'options': jsonEncode(givenOptions)});
       return _decode(json);
-    } on PlatformException catch (e) {
-      throw NativeError(e.message ?? 'Failed', code: e.code, data: e.details is String ? _decode(e.details as String) : null);
+    } on PlatformException catch (error) {
+      String errorMessage;
+      if (error.message == null) {
+        errorMessage = 'Failed';
+      } else {
+        errorMessage = error.message!;
+      }
+      Map<String, dynamic>? errorData;
+      if (error.details is String) {
+        errorData = _decode(error.details as String);
+      } else {
+        errorData = null;
+      }
+      throw NativeError(errorMessage, code: error.code, data: errorData);
     } on MissingPluginException {
       available = false;
       throw NativeError('Not in the app', code: 'unavailable');
@@ -124,40 +190,60 @@ class Native {
     }
   }
 
-  static NativeListener on(String plugin, String event, void Function(Map<String, dynamic>) fn) {
+  /// Listens for one plugin's event. The first listener for an event asks the channel to start
+  /// sending it.
+  static NativeListener on(String plugin, String event, void Function(Map<String, dynamic>) callback) {
     final key = '$plugin.$event';
-    final l = NativeListener._(key, fn);
-    final list = _listeners.putIfAbsent(key, () => []);
-    list.add(l);
+    final listener = NativeListener._(key, callback);
+    final list = _listeners.putIfAbsent(key, () {
+      return [];
+    });
+    list.add(listener);
     if (list.length == 1 && available && host == null) {
-      _channel.invokeMethod('listen', {'plugin': plugin, 'event': event}).catchError((_) => null);
+      _channel.invokeMethod('listen', {'plugin': plugin, 'event': event}).catchError((_) {
+        return null;
+      });
     }
-    return l;
+    return listener;
   }
 
   /// An event, to everything listening for it: from the channel, a host or a fake.
   static void emit(String plugin, String event, Map<String, dynamic> data) {
-    for (final l in List.of(_listeners['$plugin.$event'] ?? const <NativeListener>[])) {
+    var listening = _listeners['$plugin.$event'];
+    if (listening == null) {
+      listening = const <NativeListener>[];
+    }
+    for (final listener in List.of(listening)) {
       try {
-        l._fn(data);
+        listener._callback(data);
       } catch (_) {
         // One listener's trouble isn't the others'.
       }
     }
   }
 
-  static void _remove(NativeListener l) {
-    final list = _listeners[l._key];
-    if (list == null || !list.remove(l) || list.isNotEmpty || !available || host != null) return;
-    final parts = l._key.split('.');
-    _channel.invokeMethod('unlisten', {'plugin': parts[0], 'event': parts[1]}).catchError((_) => null);
+  /// Takes a listener away; when it was the last for its event, the channel stops sending it.
+  static void _remove(NativeListener listener) {
+    final list = _listeners[listener._key];
+    if (list == null) return;
+    final wasListening = list.remove(listener);
+    if (!wasListening) return;
+    if (list.isNotEmpty || !available || host != null) return;
+    final parts = listener._key.split('.');
+    _channel.invokeMethod('unlisten', {'plugin': parts[0], 'event': parts[1]}).catchError((_) {
+      return null;
+    });
   }
 
+  /// A JSON string from the native side as a map, or null when it's empty or not a JSON object.
   static Map<String, dynamic>? _decode(String? json) {
     if (json == null || json.isEmpty) return null;
     try {
-      final v = jsonDecode(json);
-      return v is Map ? Map<String, dynamic>.from(v) : null;
+      final decoded = jsonDecode(json);
+      if (decoded is Map) {
+        return Map<String, dynamic>.from(decoded);
+      }
+      return null;
     } catch (_) {
       return null;
     }

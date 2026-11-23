@@ -25,12 +25,22 @@ class Desktop {
   /// The .desktop file the .deb installs.
   static const linuxDesktopFile = 'uwuhere-desktop.desktop';
 
-  static bool get mac => Platform.isMacOS;
-  static bool get windows => Platform.isWindows;
-  static bool get linux => Platform.isLinux;
+  static bool get mac {
+    return Platform.isMacOS;
+  }
+
+  static bool get windows {
+    return Platform.isWindows;
+  }
+
+  static bool get linux {
+    return Platform.isLinux;
+  }
 
   /// Run from `flutter run`, not an installed copy: nothing to update, no start at sign-in.
-  static bool get fromSource => !kReleaseMode;
+  static bool get fromSource {
+    return !kReleaseMode;
+  }
 
   /// The command line the app was started with.
   static List<String> launchArgs = const [];
@@ -46,13 +56,15 @@ class Desktop {
 
   // ---------- the main window ----------
 
-  static const minSize = Size(800, 600);
-  static const compactMin = Size(360, 520);
+  static const minimumSize = Size(800, 600);
+  static const compactMinimumSize = Size(360, 520);
   static const defaultSize = Size(1120, 760);
-  static Rect? _normal;
-  static Timer? _keepTimer;
 
-  static final _listener = _WindowEvents();
+  /// The window's size and place when last neither maximised, full screen nor minimised.
+  static Rect? _normalBounds;
+  static Timer? _keepBoundsTimer;
+
+  static final _windowListener = _WindowEvents();
 
   /// Hidden, its own title bar, close keeping the app in the tray.
   static Future<void> setUp() async {
@@ -62,29 +74,38 @@ class Desktop {
         title: name,
         titleBarStyle: TitleBarStyle.hidden,
         windowButtonVisibility: true,
-        minimumSize: compactMin,
+        minimumSize: compactMinimumSize,
         size: defaultSize,
         center: true,
         skipTaskbar: false,
       ),
     );
     await windowManager.setPreventClose(true);
-    windowManager.addListener(_listener);
+    windowManager.addListener(_windowListener);
   }
 
+  /// Saves the window's size, place and maximised state, so the next launch opens it the same.
+  /// While it's being moved or resized this waits until it has been still for 600 ms; with
+  /// [now] it saves straight away.
   static void _keepBounds({bool now = false}) {
-    if (!shown) return;
-    _keepTimer?.cancel();
+    if (!shown) {
+      return;
+    }
+    if (_keepBoundsTimer != null) {
+      _keepBoundsTimer!.cancel();
+    }
     Future<void> write() async {
       try {
-        final max = await windowManager.isMaximized();
-        final full = await windowManager.isFullScreen();
-        final min = await windowManager.isMinimized();
-        if (!max && !full && !min) _normal = await windowManager.getBounds();
-        final b = _normal;
+        final isMaximized = await windowManager.isMaximized();
+        final isFullScreen = await windowManager.isFullScreen();
+        final isMinimized = await windowManager.isMinimized();
+        if (!isMaximized && !isFullScreen && !isMinimized) {
+          _normalBounds = await windowManager.getBounds();
+        }
+        final bounds = _normalBounds;
         DeskSettings.write({
-          if (b != null) 'bounds': {'x': b.left.round(), 'y': b.top.round(), 'width': b.width.round(), 'height': b.height.round()},
-          'maximized': max,
+          if (bounds != null) 'bounds': {'x': bounds.left.round(), 'y': bounds.top.round(), 'width': bounds.width.round(), 'height': bounds.height.round()},
+          'maximized': isMaximized,
         });
       } catch (_) {}
     }
@@ -92,55 +113,75 @@ class Desktop {
     if (now) {
       write();
     } else {
-      _keepTimer = Timer(const Duration(milliseconds: 600), write);
+      _keepBoundsTimer = Timer(const Duration(milliseconds: 600), write);
     }
   }
 
   /// The window, the first time: at its kept size and place (if that's still on a screen),
   /// maximised unless it was last closed un-maximised.
   static Future<void> firstShow() async {
-    if (shown) return;
+    if (shown) {
+      return;
+    }
     shown = true;
     await windowManager.setTitleBarStyle(TitleBarStyle.hidden, windowButtonVisibility: true);
     await windowManager.setResizable(true);
-    await windowManager.setMinimumSize(compactMin);
-    final s = DeskSettings.read();
-    final b = s['bounds'];
+    await windowManager.setMinimumSize(compactMinimumSize);
+    final settings = DeskSettings.read();
+    final savedBounds = settings['bounds'];
     var placed = false;
-    if (b is Map && b['width'] is num && b['height'] is num) {
-      final rect = Rect.fromLTWH(
-        (b['x'] as num? ?? 40).toDouble(),
-        (b['y'] as num? ?? 40).toDouble(),
-        (b['width'] as num).toDouble(),
-        (b['height'] as num).toDouble(),
+    if (savedBounds is Map && savedBounds['width'] is num && savedBounds['height'] is num) {
+      final savedLeft = savedBounds['x'] as num?;
+      double left = 40;
+      if (savedLeft != null) {
+        left = savedLeft.toDouble();
+      }
+      final savedTop = savedBounds['y'] as num?;
+      double top = 40;
+      if (savedTop != null) {
+        top = savedTop.toDouble();
+      }
+      final rectangle = Rect.fromLTWH(
+        left,
+        top,
+        (savedBounds['width'] as num).toDouble(),
+        (savedBounds['height'] as num).toDouble(),
       );
-      if (_onAScreen(rect)) {
-        await windowManager.setBounds(rect);
+      if (_onAScreen(rectangle)) {
+        await windowManager.setBounds(rectangle);
         placed = true;
       } else {
-        await windowManager.setSize(rect.size);
+        await windowManager.setSize(rectangle.size);
       }
     }
     if (!placed) {
-      if (b is! Map) await windowManager.setSize(defaultSize);
+      if (savedBounds is! Map) {
+        await windowManager.setSize(defaultSize);
+      }
       await windowManager.center();
     }
-    _normal = await windowManager.getBounds();
-    if (s['maximized'] != false) await windowManager.maximize();
+    _normalBounds = await windowManager.getBounds();
+    if (settings['maximized'] != false) {
+      await windowManager.maximize();
+    }
     await windowManager.show();
     await windowManager.focus();
-    for (final f in List.of(onShown)) {
-      f();
+    for (final callback in List.of(onShown)) {
+      callback();
     }
   }
 
   static final List<void Function()> onShown = [];
 
-  static bool _onAScreen(Rect r) {
+  /// Whether a rectangle is on (or near) one of the screens: it counts if it overlaps a screen
+  /// widened by a whole screen's size on every side.
+  static bool _onAScreen(Rect rectangle) {
     try {
-      for (final d in ui.PlatformDispatcher.instance.displays) {
-        final size = d.size / d.devicePixelRatio;
-        if (r.overlaps(Rect.fromLTWH(-size.width, -size.height, size.width * 3, size.height * 3))) return true;
+      for (final display in ui.PlatformDispatcher.instance.displays) {
+        final size = display.size / display.devicePixelRatio;
+        if (rectangle.overlaps(Rect.fromLTWH(-size.width, -size.height, size.width * 3, size.height * 3))) {
+          return true;
+        }
       }
     } catch (_) {}
     return false;
@@ -151,11 +192,15 @@ class Desktop {
     if (!shown) {
       await firstShow();
     } else {
-      if (await windowManager.isMinimized()) await windowManager.restore();
+      if (await windowManager.isMinimized()) {
+        await windowManager.restore();
+      }
       await windowManager.show();
       await windowManager.focus();
     }
-    if (link != null && link.isNotEmpty) Links.open(link);
+    if (link != null && link.isNotEmpty) {
+      Links.open(link);
+    }
   }
 
   /// Shown and in front, or hidden if it already is (the tray icon's click).
@@ -171,23 +216,37 @@ class Desktop {
   static Future<void> hide() async {
     _keepBounds(now: true);
     await windowManager.hide();
-    if (DeskSettings.get<bool>('trayHintShown') == true) return;
+    if (DeskSettings.get<bool>('trayHintShown') == true) {
+      return;
+    }
     DeskSettings.write({'trayHintShown': true});
-    stillRunning?.call();
+    final stillRunningCallback = stillRunning;
+    if (stillRunningCallback != null) {
+      stillRunningCallback();
+    }
   }
 
   /// Set by notify.dart: "uwuHere is still running".
   static void Function()? stillRunning;
 
-  static Future<bool> get inFront async => shown && await windowManager.isVisible() && await windowManager.isFocused();
+  /// Whether the window has been shown and is visible and focused right now.
+  static Future<bool> get inFront async {
+    if (!shown) {
+      return false;
+    }
+    if (!await windowManager.isVisible()) {
+      return false;
+    }
+    return await windowManager.isFocused();
+  }
 
   /// Quits: anything waiting for the quit (an update to install) runs first.
   static Future<void> quit() async {
     quitting = true;
     _keepBounds(now: true);
-    for (final f in List.of(beforeQuit)) {
+    for (final action in List.of(beforeQuit)) {
       try {
-        await f();
+        await action();
       } catch (_) {}
     }
     await windowManager.setPreventClose(false);
@@ -196,41 +255,57 @@ class Desktop {
 
   static final List<Future<void> Function()> beforeQuit = [];
 
-  static Future<void> setFullScreen(bool on) async {
-    await windowManager.setFullScreen(on);
-    fullScreen.value = on;
+  static Future<void> setFullScreen(bool enabled) async {
+    await windowManager.setFullScreen(enabled);
+    fullScreen.value = enabled;
   }
 
   // ---------- one copy at a time ----------
 
-  static ServerSocket? _instance;
+  static ServerSocket? _instanceServer;
 
-  static File get _portFile => File('${DeskSettings.folder}${Platform.pathSeparator}instance.port');
+  static File get _portFile {
+    return File('${DeskSettings.folder}${Platform.pathSeparator}instance.port');
+  }
 
   /// True when this is the only copy. Otherwise the running copy is handed this one's command
   /// line (a link, or just "come forward"), and this one should quit.
-  static Future<bool> claimInstance(List<String> args) async {
+  ///
+  /// The running copy listens on a local port written to instance.port; a new copy that can
+  /// reach it sends its command line there and gives way. Otherwise the new copy starts
+  /// listening itself.
+  static Future<bool> claimInstance(List<String> commandLineArguments) async {
     try {
       final port = int.tryParse(_portFile.readAsStringSync().trim());
       if (port != null) {
-        final s = await Socket.connect(InternetAddress.loopbackIPv4, port, timeout: const Duration(milliseconds: 700));
-        s.write(jsonEncode({'app': appId, 'args': args}));
-        await s.flush();
-        await s.close();
+        final socket = await Socket.connect(InternetAddress.loopbackIPv4, port, timeout: const Duration(milliseconds: 700));
+        socket.write(jsonEncode({'app': appId, 'args': commandLineArguments}));
+        await socket.flush();
+        await socket.close();
         return false;
       }
     } catch (_) {
       // Nobody listening: this copy is the one.
     }
     try {
-      _instance = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+      final server = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+      _instanceServer = server;
       _portFile.parent.createSync(recursive: true);
-      _portFile.writeAsStringSync('${_instance!.port}');
-      _instance!.listen((client) {
+      _portFile.writeAsStringSync('${server.port}');
+      server.listen((client) {
         utf8.decoder.bind(client).join().then((text) {
           try {
-            final m = jsonDecode(text);
-            if (m is Map && m['app'] == appId) onSecondCopy(List<String>.from(m['args'] as List? ?? const []));
+            final message = jsonDecode(text);
+            if (message is Map && message['app'] == appId) {
+              final sentArguments = message['args'] as List?;
+              List<dynamic> argumentList;
+              if (sentArguments == null) {
+                argumentList = const [];
+              } else {
+                argumentList = sentArguments;
+              }
+              onSecondCopy(List<String>.from(argumentList));
+            }
           } catch (_) {}
         });
       });
@@ -239,9 +314,9 @@ class Desktop {
   }
 
   /// Another copy was opened: this one comes forward, on its link if it had one.
-  static void onSecondCopy(List<String> args) {
-    final link = linkIn(args);
-    if (link != null && !_ours(link)) {
+  static void onSecondCopy(List<String> commandLineArguments) {
+    final link = linkIn(commandLineArguments);
+    if (link != null && !_isForThisApp(link)) {
       handOff(link);
       return;
     }
@@ -250,38 +325,63 @@ class Desktop {
 
   // ---------- links ----------
 
-  static String? linkIn(List<String> args) => args.where((a) => a.toLowerCase().startsWith('$appScheme://')).firstOrNull;
+  /// The first uwu:// link on a command line, if there is one.
+  static String? linkIn(List<String> commandLineArguments) {
+    for (final argument in commandLineArguments) {
+      if (argument.toLowerCase().startsWith('$appScheme://')) {
+        return argument;
+      }
+    }
+    return null;
+  }
 
-  static bool _ours(String link) => (Uri.tryParse(link)?.host ?? '').toLowerCase() == appHost;
+  /// Whether a uwu:// link is for this app (uwu://here/) rather than another UwU App.
+  static bool _isForThisApp(String link) {
+    final uri = Uri.tryParse(link);
+    String host = '';
+    if (uri != null) {
+      host = uri.host;
+    }
+    return host.toLowerCase() == appHost;
+  }
 
   /// Registers uwu:// for this app at every start (Windows), so links keep working after an update
   /// or a move. A desktop gives a scheme to one app only, so whichever UwU App holds it is noted
   /// first, and links for its host are handed to it (handOff).
   static Future<void> registerScheme() async {
-    if (fromSource) return;
+    if (fromSource) {
+      return;
+    }
     if (windows) {
-      final exe = Platform.resolvedExecutable;
-      const key = r'HKCU\Software\Classes\uwu';
-      final mine = '"$exe" "%1"';
+      final executablePath = Platform.resolvedExecutable;
+      const registryKey = r'HKCU\Software\Classes\uwu';
+      final ourCommand = '"$executablePath" "%1"';
       try {
-        final r = await Process.run('reg', ['query', '$key\\shell\\open\\command', '/ve']);
-        final current = RegExp(r'REG_SZ\s+(.+)$', multiLine: true).firstMatch('${r.stdout}')?.group(1)?.trim();
-        if (current != null && current.isNotEmpty && current.toLowerCase() != mine.toLowerCase() && !current.toLowerCase().contains('uwuhere')) {
+        final queryResult = await Process.run('reg', ['query', '$registryKey\\shell\\open\\command', '/ve']);
+        final match = RegExp(r'REG_SZ\s+(.+)$', multiLine: true).firstMatch('${queryResult.stdout}');
+        String? currentCommand;
+        if (match != null) {
+          final matchedCommand = match.group(1);
+          if (matchedCommand != null) {
+            currentCommand = matchedCommand.trim();
+          }
+        }
+        if (currentCommand != null && currentCommand.isNotEmpty && currentCommand.toLowerCase() != ourCommand.toLowerCase() && !currentCommand.toLowerCase().contains('uwuhere')) {
           DeskSettings.write({
-            'linkHandoff': {'command': current},
+            'linkHandoff': {'command': currentCommand},
           });
         }
-        await Process.run('reg', ['add', key, '/ve', '/d', 'URL:UwU Apps link', '/f']);
-        await Process.run('reg', ['add', key, '/v', 'URL Protocol', '/d', '', '/f']);
-        await Process.run('reg', ['add', '$key\\shell\\open\\command', '/ve', '/d', mine, '/f']);
+        await Process.run('reg', ['add', registryKey, '/ve', '/d', 'URL:UwU Apps link', '/f']);
+        await Process.run('reg', ['add', registryKey, '/v', 'URL Protocol', '/d', '', '/f']);
+        await Process.run('reg', ['add', '$registryKey\\shell\\open\\command', '/ve', '/d', ourCommand, '/f']);
       } catch (_) {}
     } else if (linux) {
       try {
-        final r = await Process.run('xdg-mime', ['query', 'default', 'x-scheme-handler/uwu']);
-        final current = '${r.stdout}'.trim();
-        if (current.isNotEmpty && current != linuxDesktopFile) {
+        final queryResult = await Process.run('xdg-mime', ['query', 'default', 'x-scheme-handler/uwu']);
+        final currentHandler = '${queryResult.stdout}'.trim();
+        if (currentHandler.isNotEmpty && currentHandler != linuxDesktopFile) {
           DeskSettings.write({
-            'linkHandoff': {'desktop': current},
+            'linkHandoff': {'desktop': currentHandler},
           });
         }
         await Process.run('xdg-mime', ['default', linuxDesktopFile, 'x-scheme-handler/uwu']);
@@ -292,18 +392,39 @@ class Desktop {
   /// A link for another UwU App, passed to the one that held the scheme before this one, as one
   /// argument and never through a shell.
   static Future<bool> handOff(String link) async {
-    final h = DeskSettings.get<Map<String, dynamic>>('linkHandoff');
+    final handoff = DeskSettings.get<Map<String, dynamic>>('linkHandoff');
     try {
-      if (windows && h?['command'] is String) {
-        final parts = RegExp(r'"([^"]+)"|(\S+)').allMatches(h!['command'] as String).map((m) => m.group(1) ?? m.group(2)!).toList();
-        if (parts.isEmpty) return false;
-        final args = [for (final p in parts.skip(1)) p == '%1' ? link : p];
-        if (!args.contains(link)) args.add(link);
-        await Process.start(parts.first, args, mode: ProcessStartMode.detached);
+      if (windows && handoff != null && handoff['command'] is String) {
+        // The saved command split into its parts: "quoted parts" or plain words.
+        final parts = <String>[];
+        for (final match in RegExp(r'"([^"]+)"|(\S+)').allMatches(handoff['command'] as String)) {
+          final quotedPart = match.group(1);
+          if (quotedPart != null) {
+            parts.add(quotedPart);
+          } else {
+            parts.add(match.group(2)!);
+          }
+        }
+        if (parts.isEmpty) {
+          return false;
+        }
+        // The link goes where the command has %1, or on the end.
+        final launchArguments = <String>[];
+        for (final part in parts.skip(1)) {
+          if (part == '%1') {
+            launchArguments.add(link);
+          } else {
+            launchArguments.add(part);
+          }
+        }
+        if (!launchArguments.contains(link)) {
+          launchArguments.add(link);
+        }
+        await Process.start(parts.first, launchArguments, mode: ProcessStartMode.detached);
         return true;
       }
-      if (linux && h?['desktop'] is String) {
-        await Process.start('gtk-launch', [h!['desktop'] as String, link], mode: ProcessStartMode.detached);
+      if (linux && handoff != null && handoff['desktop'] is String) {
+        await Process.start('gtk-launch', [handoff['desktop'] as String, link], mode: ProcessStartMode.detached);
         return true;
       }
     } catch (_) {}
@@ -312,54 +433,87 @@ class Desktop {
 
   // ---------- starting at sign-in ----------
 
-  static File get _autostart => File('${Platform.environment['XDG_CONFIG_HOME'] ?? '${Platform.environment['HOME']}/.config'}/autostart/uwuhere.desktop');
-  static File get _launchAgent => File('${Platform.environment['HOME']}/Library/LaunchAgents/$appId.plist');
+  /// Linux: the autostart entry, in $XDG_CONFIG_HOME (or ~/.config) /autostart.
+  static File get _autostartFile {
+    final configFolderSetting = Platform.environment['XDG_CONFIG_HOME'];
+    String configFolder;
+    if (configFolderSetting != null) {
+      configFolder = configFolderSetting;
+    } else {
+      configFolder = '${Platform.environment['HOME']}/.config';
+    }
+    return File('$configFolder/autostart/uwuhere.desktop');
+  }
+
+  /// macOS: the launch agent that opens the app at sign-in.
+  static File get _launchAgentFile {
+    return File('${Platform.environment['HOME']}/Library/LaunchAgents/$appId.plist');
+  }
+
   static const _runKey = r'HKCU\Software\Microsoft\Windows\CurrentVersion\Run';
 
   static Future<bool> startsAtLogin() async {
     try {
-      if (linux) return _autostart.existsSync();
-      if (mac) return _launchAgent.existsSync();
-      final r = await Process.run('reg', ['query', _runKey, '/v', name]);
-      return r.exitCode == 0;
+      if (linux) {
+        return _autostartFile.existsSync();
+      }
+      if (mac) {
+        return _launchAgentFile.existsSync();
+      }
+      final result = await Process.run('reg', ['query', _runKey, '/v', name]);
+      return result.exitCode == 0;
     } catch (_) {
       return false;
     }
   }
 
-  static Future<void> setStartAtLogin(bool on) async {
-    if (fromSource) return;
+  /// Turns starting at sign-in on or off: an autostart entry (Linux), a launch agent (macOS) or
+  /// the Run key in the registry (Windows).
+  static Future<void> setStartAtLogin(bool enabled) async {
+    if (fromSource) {
+      return;
+    }
     try {
       if (linux) {
-        final f = _autostart;
-        if (!on) {
-          if (f.existsSync()) f.deleteSync();
+        final file = _autostartFile;
+        if (!enabled) {
+          if (file.existsSync()) {
+            file.deleteSync();
+          }
           return;
         }
         // An AppImage runs from a temporary mount, so it's started by the file itself.
-        final exec = Platform.environment['APPIMAGE'] ?? Platform.resolvedExecutable;
-        f.parent.createSync(recursive: true);
-        f.writeAsStringSync(
-          ['[Desktop Entry]', 'Type=Application', 'Name=$name', 'Exec="$exec" --hidden', 'Icon=uwuhere', 'X-GNOME-Autostart-enabled=true', ''].join('\n'),
+        final appImagePath = Platform.environment['APPIMAGE'];
+        String executablePath;
+        if (appImagePath != null) {
+          executablePath = appImagePath;
+        } else {
+          executablePath = Platform.resolvedExecutable;
+        }
+        file.parent.createSync(recursive: true);
+        file.writeAsStringSync(
+          ['[Desktop Entry]', 'Type=Application', 'Name=$name', 'Exec="$executablePath" --hidden', 'Icon=uwuhere', 'X-GNOME-Autostart-enabled=true', ''].join('\n'),
         );
       } else if (mac) {
-        final f = _launchAgent;
-        if (!on) {
-          if (f.existsSync()) f.deleteSync();
+        final file = _launchAgentFile;
+        if (!enabled) {
+          if (file.existsSync()) {
+            file.deleteSync();
+          }
           return;
         }
-        final app = File(Platform.resolvedExecutable).parent.parent.parent.path;
-        f.parent.createSync(recursive: true);
-        f.writeAsStringSync('''<?xml version="1.0" encoding="UTF-8"?>
+        final appBundlePath = File(Platform.resolvedExecutable).parent.parent.parent.path;
+        file.parent.createSync(recursive: true);
+        file.writeAsStringSync('''<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
 <key>Label</key><string>$appId</string>
-<key>ProgramArguments</key><array><string>/usr/bin/open</string><string>-a</string><string>$app</string></array>
+<key>ProgramArguments</key><array><string>/usr/bin/open</string><string>-a</string><string>$appBundlePath</string></array>
 <key>RunAtLoad</key><true/>
 </dict></plist>
 ''');
       } else {
-        if (on) {
+        if (enabled) {
           await Process.run('reg', ['add', _runKey, '/v', name, '/d', '"${Platform.resolvedExecutable}"', '/f']);
         } else {
           await Process.run('reg', ['delete', _runKey, '/v', name, '/f']);
@@ -371,7 +525,9 @@ class Desktop {
   /// From the first run of an installed copy the app starts at sign-in, until it's turned off;
   /// once chosen, the choice sticks (loginChosen).
   static Future<void> startAtLoginFirstRun() async {
-    if (fromSource || DeskSettings.get<bool>('loginChosen') == true) return;
+    if (fromSource || DeskSettings.get<bool>('loginChosen') == true) {
+      return;
+    }
     await setStartAtLogin(true);
     DeskSettings.write({'loginChosen': true});
   }
@@ -404,35 +560,51 @@ class Desktop {
     } catch (_) {}
   }
 
-  /// The Downloads folder.
+  /// The Downloads folder: on Linux, the one named in ~/.config/user-dirs.dirs if there is one.
   static String get downloads {
-    final env = Platform.environment;
-    if (windows) return '${env['USERPROFILE']}\\Downloads';
-    final home = env['HOME'] ?? '';
+    final environment = Platform.environment;
+    if (windows) {
+      return '${environment['USERPROFILE']}\\Downloads';
+    }
+    final homeSetting = environment['HOME'];
+    String home = '';
+    if (homeSetting != null) {
+      home = homeSetting;
+    }
     if (linux) {
       try {
-        final dirs = File('$home/.config/user-dirs.dirs').readAsStringSync();
-        final m = RegExp(r'^XDG_DOWNLOAD_DIR="(.+)"$', multiLine: true).firstMatch(dirs);
-        if (m != null) return m[1]!.replaceAll(r'$HOME', home);
+        final userFolders = File('$home/.config/user-dirs.dirs').readAsStringSync();
+        final match = RegExp(r'^XDG_DOWNLOAD_DIR="(.+)"$', multiLine: true).firstMatch(userFolders);
+        if (match != null) {
+          return match[1]!.replaceAll(r'$HOME', home);
+        }
       } catch (_) {}
     }
     return '$home/Downloads';
   }
 }
 
+/// Follows the main window: close puts it in the tray, moves and resizes are saved, and the
+/// maximised and full screen states are kept for the title bar.
 class _WindowEvents with WindowListener {
   @override
   void onWindowClose() {
     // Not while the window is Make it yours or the update window: they handle their own close.
-    if (Desktop.quitting || !Desktop.shown) return;
+    if (Desktop.quitting || !Desktop.shown) {
+      return;
+    }
     Desktop.hide();
   }
 
   @override
-  void onWindowMoved() => Desktop._keepBounds();
+  void onWindowMoved() {
+    Desktop._keepBounds();
+  }
 
   @override
-  void onWindowResized() => Desktop._keepBounds();
+  void onWindowResized() {
+    Desktop._keepBounds();
+  }
 
   @override
   void onWindowMaximize() {
@@ -447,8 +619,12 @@ class _WindowEvents with WindowListener {
   }
 
   @override
-  void onWindowEnterFullScreen() => Desktop.fullScreen.value = true;
+  void onWindowEnterFullScreen() {
+    Desktop.fullScreen.value = true;
+  }
 
   @override
-  void onWindowLeaveFullScreen() => Desktop.fullScreen.value = false;
+  void onWindowLeaveFullScreen() {
+    Desktop.fullScreen.value = false;
+  }
 }

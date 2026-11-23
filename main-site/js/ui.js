@@ -2,11 +2,13 @@ import { icon } from "./icons.js";
 
 // Safe to call repeatedly; re-renders when data-icon changes.
 export function hydrateIcons(root = document) {
-  root.querySelectorAll("[data-icon]").forEach((el) => {
-    const name = el.dataset.icon;
-    if (el.dataset.iconRendered === name) return;
-    el.innerHTML = icon(name);
-    el.dataset.iconRendered = name;
+  root.querySelectorAll("[data-icon]").forEach((element) => {
+    const name = element.dataset.icon;
+    if (element.dataset.iconRendered === name) {
+      return;
+    }
+    element.innerHTML = icon(name);
+    element.dataset.iconRendered = name;
   });
 }
 
@@ -18,8 +20,14 @@ export function openModal(id) {
   returnFocus.set(id, document.activeElement);
   backdrop.classList.remove("hidden");
   document.body.classList.add("modal-open");
-  const first = backdrop.querySelector("input, select, textarea, button:not([data-close-modal])");
-  (first ?? backdrop.querySelector("button"))?.focus({ preventScroll: true });
+  // Focus the first field, or failing that the first button.
+  let elementToFocus = backdrop.querySelector("input, select, textarea, button:not([data-close-modal])");
+  if (elementToFocus === null || elementToFocus === undefined) {
+    elementToFocus = backdrop.querySelector("button");
+  }
+  if (elementToFocus !== null && elementToFocus !== undefined) {
+    elementToFocus.focus({ preventScroll: true });
+  }
 }
 
 export function closeModal(id) {
@@ -29,15 +37,19 @@ export function closeModal(id) {
   }
   const previous = returnFocus.get(id);
   returnFocus.delete(id);
-  if (previous && document.contains(previous)) previous.focus({ preventScroll: true });
+  if (previous && document.contains(previous)) {
+    previous.focus({ preventScroll: true });
+  }
   // However it was closed (its button, the backdrop, Escape), for a page that
   // has something to undo, such as the QR code's full brightness.
   document.dispatchEvent(new CustomEvent("uwu:modalclose", { detail: { id } }));
 }
 
+const HTML_ESCAPES = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+
 export function escapeHtml(value) {
-  return String(value).replace(/[&<>"']/g, (c) => {
-    return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+  return String(value).replace(/[&<>"']/g, (character) => {
+    return HTML_ESCAPES[character];
   });
 }
 
@@ -45,35 +57,51 @@ export function escapeHtml(value) {
 // deserve a modal. One toast at a time; a second call replaces the first.
 let toastTimer = null;
 export function toast(message) {
-  let el = document.querySelector(".toast");
-  if (!el) {
-    el = document.createElement("div");
-    el.className = "toast hidden";
-    el.setAttribute("role", "status");
-    document.body.appendChild(el);
+  let toastElement = document.querySelector(".toast");
+  if (!toastElement) {
+    toastElement = document.createElement("div");
+    toastElement.className = "toast hidden";
+    toastElement.setAttribute("role", "status");
+    document.body.appendChild(toastElement);
     // One frame in the hidden state first, so the first toast animates in.
-    void el.offsetWidth;
+    void toastElement.offsetWidth;
   }
-  el.textContent = message;
-  el.classList.remove("hidden");
+  toastElement.textContent = message;
+  toastElement.classList.remove("hidden");
 
-  if (toastTimer) clearTimeout(toastTimer);
+  if (toastTimer) {
+    clearTimeout(toastTimer);
+  }
   toastTimer = setTimeout(() => {
-    el.classList.add("hidden");
+    toastElement.classList.add("hidden");
     toastTimer = null;
   }, 2400);
 }
 
-export function formatTime(iso) {
-  if (!iso) return "";
-  return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+export function formatTime(isoTimestamp) {
+  if (!isoTimestamp) {
+    return "";
+  }
+  return new Date(isoTimestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
-export function formatDateTime(iso) {
-  if (!iso) return "";
-  return new Date(iso).toLocaleString([], {
+export function formatDateTime(isoTimestamp) {
+  if (!isoTimestamp) {
+    return "";
+  }
+  return new Date(isoTimestamp).toLocaleString([], {
     day: "numeric", month: "short", hour: "2-digit", minute: "2-digit",
   });
+}
+
+// One colour channel (0 to 255) as linear light (0 to 1), the step the WCAG
+// relative luminance formula needs.
+function linearChannel(channelValue) {
+  const scaled = channelValue / 255;
+  if (scaled <= 0.03928) {
+    return scaled / 12.92;
+  }
+  return ((scaled + 0.055) / 1.055) ** 2.4;
 }
 
 /**
@@ -82,17 +110,19 @@ export function formatDateTime(iso) {
  * out rather than assumed: a host can pick navy as easily as pastel.
  */
 export function inkFor(hex) {
-  const n = parseInt(String(hex).replace("#", ""), 16);
-  const channel = (c) => {
-    const s = c / 255;
-    return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
-  };
-  const lum = 0.2126 * channel((n >> 16) & 255) + 0.7152 * channel((n >> 8) & 255) + 0.0722 * channel(n & 255);
+  const colourNumber = parseInt(String(hex).replace("#", ""), 16);
+  const red = (colourNumber >> 16) & 255;
+  const green = (colourNumber >> 8) & 255;
+  const blue = colourNumber & 255;
+  const luminance = 0.2126 * linearChannel(red) + 0.7152 * linearChannel(green) + 0.0722 * linearChannel(blue);
   // Contrast against the theme's dark ink (#121815, luminance about 0.009)
   // and against white.
-  const withDark = (lum + 0.05) / (0.009 + 0.05);
-  const withWhite = 1.05 / (lum + 0.05);
-  return withDark >= withWhite ? "#121815" : "#ffffff";
+  const contrastWithDark = (luminance + 0.05) / (0.009 + 0.05);
+  const contrastWithWhite = 1.05 / (luminance + 0.05);
+  if (contrastWithDark >= contrastWithWhite) {
+    return "#121815";
+  }
+  return "#ffffff";
 }
 
 /** Code points, the way the server and the database count a limit. */
@@ -110,16 +140,18 @@ export function armed(button, prompt) {
     clearTimeout(Number(button.dataset.armTimer));
     return true;
   }
-  const original = button.innerHTML;
-  const label = button.getAttribute("aria-label");
+  const originalMarkup = button.innerHTML;
+  const originalLabel = button.getAttribute("aria-label");
   button.classList.add("confirming");
   button.textContent = prompt;
   button.setAttribute("aria-label", prompt);
   button.dataset.armTimer = String(
     setTimeout(() => {
       button.classList.remove("confirming");
-      button.innerHTML = original;
-      if (label) button.setAttribute("aria-label", label);
+      button.innerHTML = originalMarkup;
+      if (originalLabel) {
+        button.setAttribute("aria-label", originalLabel);
+      }
     }, 3000)
   );
   return false;
@@ -127,7 +159,9 @@ export function armed(button, prompt) {
 
 /** Paints a .here-btn in an event's colour, with text that contrasts. */
 export function paintHereButton(button, colour) {
-  if (!/^#[0-9a-fA-F]{6}$/.test(String(colour))) return;
+  if (!/^#[0-9a-fA-F]{6}$/.test(String(colour))) {
+    return;
+  }
   button.style.setProperty("--event-color", colour);
   button.style.setProperty("--on-event", inkFor(colour));
 }
@@ -138,8 +172,12 @@ export function paintHereButton(button, colour) {
  * wrap onto two lines at the smallest size.
  */
 export function hereLabelSize(label) {
-  const n = charCount(label);
-  if (n <= 8) return "2.1rem";
-  if (n <= 14) return "1.7rem";
+  const labelLength = charCount(label);
+  if (labelLength <= 8) {
+    return "2.1rem";
+  }
+  if (labelLength <= 14) {
+    return "1.7rem";
+  }
   return "1.4rem";
 }

@@ -54,9 +54,9 @@ void main() {
 
   test('links: the site\'s pages, uwu://here/ and codes typed in', () {
     expect(parseLink('https://here.uwuapps.org/join?id=bcd234&tap=1763251200.abcdefgh.sig'), isA<LinkJoin>());
-    final j = parseLink('https://here.uwuapps.org/join?id=bcd234&tap=1763251200.abcdefgh.sig') as LinkJoin;
-    expect(j.code, 'BCD234');
-    expect(j.tap, '1763251200.abcdefgh.sig');
+    final joinLink = parseLink('https://here.uwuapps.org/join?id=bcd234&tap=1763251200.abcdefgh.sig') as LinkJoin;
+    expect(joinLink.code, 'BCD234');
+    expect(joinLink.tap, '1763251200.abcdefgh.sig');
     expect((parseLink('uwu://here/host?id=BCD234') as LinkHost).code, 'BCD234');
     expect((parseLink('https://here.uwuapps.org/#join') as LinkHome).focus, 'join');
     expect(parseLink('https://here.uwuapps.org/privacy'), isA<LinkOut>());

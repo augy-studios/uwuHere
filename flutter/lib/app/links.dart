@@ -56,22 +56,34 @@ class LinkOut extends LinkTarget {
 final _plainPath = RegExp(r'^[A-Za-z0-9/_\-.]*$');
 final _token = RegExp(r'^[A-Za-z0-9._~-]{8,400}$');
 
+/// The link's event code (its `id`), or null when it has none or it isn't a valid code.
 String? _code(Uri uri) {
   final id = normaliseCode(uri.queryParameters['id']);
-  return isValidCode(id) ? id : null;
+  if (isValidCode(id)) {
+    return id;
+  } else {
+    return null;
+  }
 }
 
+/// Which page a path is for (the site's own, or the app scheme's), with `.html` and the slashes
+/// at either end left off.
 LinkTarget _forPath(String path, Uri uri) {
-  final p = path.replaceAll(RegExp(r'\.html$'), '').replaceAll(RegExp(r'^/+|/+$'), '');
+  final cleanPath = path.replaceAll(RegExp(r'\.html$'), '').replaceAll(RegExp(r'^/+|/+$'), '');
   final focus = switch (uri.fragment) {
     'join' => 'join',
     'host' => 'host',
     _ => null,
   };
-  switch (p) {
+  switch (cleanPath) {
     case 'join':
       final tap = uri.queryParameters['tap'];
-      return LinkJoin(_code(uri), tap != null && _token.hasMatch(tap) ? tap : null);
+      // A tap token is only kept when it looks like one.
+      String? validTap;
+      if (tap != null && _token.hasMatch(tap)) {
+        validTap = tap;
+      }
+      return LinkJoin(_code(uri), validTap);
     case 'host':
       return LinkHost(_code(uri));
     case 'updates':
@@ -86,7 +98,15 @@ LinkTarget? parseLink(String raw) {
   final text = raw.trim();
   if (text.isEmpty) return null;
   // A path typed into the desktop's command bar.
-  if (text.startsWith('/') || text.startsWith('#')) return parseLink('$siteOrigin${text.startsWith('#') ? '/$text' : text}');
+  if (text.startsWith('/') || text.startsWith('#')) {
+    String path;
+    if (text.startsWith('#')) {
+      path = '/$text';
+    } else {
+      path = text;
+    }
+    return parseLink('$siteOrigin$path');
+  }
   // Just a code, typed into the command bar: its check-in page.
   if (isValidCode(text) && text.replaceAll(RegExp('[^A-Za-z0-9]'), '').length == codeLength) return LinkJoin(normaliseCode(text));
   final uri = Uri.tryParse(text);
@@ -98,8 +118,8 @@ LinkTarget? parseLink(String raw) {
   }
   if ((uri.scheme == 'https' || uri.scheme == 'http') && uri.host == siteHost) {
     // The site's pages the app doesn't draw (privacy, the guide) open in the browser.
-    final p = uri.path.replaceAll(RegExp(r'/+$'), '');
-    if (p == '/privacy' || p.startsWith('/api/')) return LinkOut(uri);
+    final pathWithoutTrailingSlash = uri.path.replaceAll(RegExp(r'/+$'), '');
+    if (pathWithoutTrailingSlash == '/privacy' || pathWithoutTrailingSlash.startsWith('/api/')) return LinkOut(uri);
     return _forPath(uri.path, uri);
   }
   if (uri.scheme == 'https' || uri.scheme == 'http' || uri.scheme == 'mailto') return LinkOut(uri);
@@ -111,10 +131,18 @@ String linkForPage() {
   switch (AppPages.active()) {
     case AppPages.host:
       final code = AppPages.hostCode.value;
-      return code == null ? '$siteOrigin/' : '$siteOrigin/host?id=$code';
+      if (code == null) {
+        return '$siteOrigin/';
+      } else {
+        return '$siteOrigin/host?id=$code';
+      }
     case AppPages.join:
       final code = AppPages.joinCode.value;
-      return code == null ? '$siteOrigin/join' : '$siteOrigin/join?id=$code';
+      if (code == null) {
+        return '$siteOrigin/join';
+      } else {
+        return '$siteOrigin/join?id=$code';
+      }
   }
   return '$siteOrigin/';
 }
@@ -126,7 +154,8 @@ class Links {
   static String? pending;
   static bool shown = false;
 
-  /// Opens a link. Returns false when it was nothing the app knows.
+  /// Opens a link. Returns false when it was nothing the app knows. Before the app is on screen,
+  /// a link to one of its own pages is kept in [pending] and opened by [appShown].
   static Future<bool> open(String raw) async {
     final target = parseLink(raw);
     if (target == null) return false;
@@ -160,8 +189,8 @@ class Links {
   /// Once the app is on screen: a link that opened it, now usable.
   static void appShown() {
     shown = true;
-    final p = pending;
+    final pendingLink = pending;
     pending = null;
-    if (p != null) open(p);
+    if (pendingLink != null) open(pendingLink);
   }
 }

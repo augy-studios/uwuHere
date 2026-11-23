@@ -30,9 +30,9 @@ import '../notify/host_alerts.dart';
 import '../widget/app_widget.dart';
 import 'save_file.dart';
 
-const _pollEvery = Duration(seconds: 5);
-const _maxTakenRetries = 3;
-const _takenRetryAfter = Duration(seconds: 4);
+const _pollInterval = Duration(seconds: 5);
+const _maximumTakenRetries = 3;
+const _takenRetryDelay = Duration(seconds: 4);
 
 const limitTitle = 80;
 const limitButtonLabel = 20;
@@ -51,7 +51,22 @@ const methodInfo = <String, ({String icon, String label})>{
   'hotspot': (icon: 'hotspot', label: "Host's hotspot"),
 };
 
-({String icon, String label}) methodOf(String? m) => methodInfo[m] ?? methodInfo['manual']!;
+/// The icon and label for a check-in [method]; one the list doesn't know shows as "Added by hand".
+({String icon, String label}) methodOf(String? method) {
+  final details = methodInfo[method];
+  if (details == null) {
+    return methodInfo['manual']!;
+  }
+  return details;
+}
+
+/// [value] as text, or [fallback] when there is no value at all.
+String _textOrDefault(Object? value, String fallback) {
+  if (value == null) {
+    return fallback;
+  }
+  return '$value';
+}
 
 /// One row of the list: from the server, or waiting in the outbox.
 class Attendee {
@@ -75,15 +90,18 @@ class Attendee {
   final String? leftEarlyAt;
   final bool pending;
 
-  static Attendee from(Map m) => Attendee(
-    id: '${m['id']}',
-    name: '${m['name'] ?? ''}',
-    note: m['note'] as String?,
-    method: '${m['method'] ?? 'manual'}',
-    distance: m['distance'] as num?,
-    checkedInAt: '${m['checkedInAt'] ?? ''}',
-    leftEarlyAt: m['leftEarlyAt'] as String?,
-  );
+  /// An attendee as the server (or this device's saved copy) describes one.
+  static Attendee from(Map fields) {
+    return Attendee(
+      id: '${fields['id']}',
+      name: _textOrDefault(fields['name'], ''),
+      note: fields['note'] as String?,
+      method: _textOrDefault(fields['method'], 'manual'),
+      distance: fields['distance'] as num?,
+      checkedInAt: _textOrDefault(fields['checkedInAt'], ''),
+      leftEarlyAt: fields['leftEarlyAt'] as String?,
+    );
+  }
 }
 
 /// What a status row shows: its light, its sentence, and its button, if any.
@@ -99,7 +117,9 @@ class HostController extends ChangeNotifier with WidgetsBindingObserver {
   HostController(this.code) {
     WidgetsBinding.instance.addObserver(this);
     _listeners = [
-      Native.on('Here', 'tapped', (_) => AppNav.toast('Phone tapped. They finish on their phone.')),
+      Native.on('Here', 'tapped', (_) {
+        AppNav.toast('Phone tapped. They finish on their phone.');
+      }),
       Native.on('Here', 'meshCheckin', (data) async {
         final answer = await takeCheckin(data, 'mesh');
         Native.tryCall('Here', 'meshAnswer', {'id': data['id'], 'ok': answer['type'] == 'checked-in', 'at': answer['at'], 'message': answer['message']});
@@ -115,7 +135,7 @@ class HostController extends ChangeNotifier with WidgetsBindingObserver {
         updateWakeLock();
       }),
     ];
-    _offOnline = Api.onOnline(_online);
+    _stopListeningForOnline = Api.onOnline(_online);
     AppPages.current.addListener(updateWakeLock);
   }
 
@@ -135,12 +155,12 @@ class HostController extends ChangeNotifier with WidgetsBindingObserver {
 
   /// "ok", "offline" or "unavailable".
   String connection = 'ok';
-  Timer? _poll;
+  Timer? _pollTimer;
   bool _flushing = false;
   bool _disposed = false;
-  late final void Function() _offOnline;
+  late final void Function() _stopListeningForOnline;
 
-  P2pHost? _host;
+  P2pHost? _p2pHost;
   P2pStatus p2p = const P2pStatus('idle');
   int _takenRetries = 0;
   Timer? _retryTimer;
@@ -150,10 +170,10 @@ class HostController extends ChangeNotifier with WidgetsBindingObserver {
   bool _tapWanted = false;
 
   /// About Bluetooth: "idle", "ready", "needs-permission", "denied", "bt-off", "unsupported", or
-  /// "failed" with btFailed.
-  String btState = 'idle';
-  String btFailed = '';
-  bool _btWanted = false;
+  /// "failed" with bluetoothFailure.
+  String bluetoothState = 'idle';
+  String bluetoothFailure = '';
+  bool _bluetoothWanted = false;
 
   /// { status: "off" | "starting" | "on" | "failed", ssid, password, security, url, message }.
   Map<String, dynamic> hotspot = {'status': 'off'};
@@ -164,15 +184,38 @@ class HostController extends ChangeNotifier with WidgetsBindingObserver {
   bool _awake = false;
   bool _resumed = true;
 
-  bool get ended => event?['ended'] == true;
-  bool get paused => event?['paused'] == true;
-  String get title => '${event?['title'] ?? ''}';
-  String? get noteLabel {
-    final n = event?['noteLabel'];
-    return n is String && n.isNotEmpty ? n : null;
+  /// One of the event's own values, or null while there is no event.
+  Object? _eventValue(String key) {
+    final currentEvent = event;
+    if (currentEvent == null) {
+      return null;
+    }
+    return currentEvent[key];
   }
 
-  String get joinLink => '$siteOrigin/join?id=$code';
+  bool get ended {
+    return _eventValue('ended') == true;
+  }
+
+  bool get paused {
+    return _eventValue('paused') == true;
+  }
+
+  String get title {
+    return _textOrDefault(_eventValue('title'), '');
+  }
+
+  String? get noteLabel {
+    final label = _eventValue('noteLabel');
+    if (label is String && label.isNotEmpty) {
+      return label;
+    }
+    return null;
+  }
+
+  String get joinLink {
+    return '$siteOrigin/join?id=$code';
+  }
 
   void _changed() {
     if (!_disposed) notifyListeners();
@@ -180,6 +223,8 @@ class HostController extends ChangeNotifier with WidgetsBindingObserver {
 
   // ------------------------------------------------------------------ boot
 
+  /// Opens the event: the locked view without this device's key, else the saved copy at once,
+  /// then the server's, then polling every few seconds.
   Future<void> boot() async {
     hostKey = HereStore.hostKey(code);
     if (hostKey == null) {
@@ -187,7 +232,7 @@ class HostController extends ChangeNotifier with WidgetsBindingObserver {
       return;
     }
     final cache = HereStore.hostCache(code);
-    if (cache?['event'] is Map) _applySnapshot(cache!, fromCache: true);
+    if (cache != null && cache['event'] is Map) _applySnapshot(cache, fromCache: true);
     await refresh();
     if (event == null && connection != 'ok') {
       _showMissing('Not available offline', 'This event has not been opened on this device before. Connect to the internet and try again.');
@@ -196,22 +241,29 @@ class HostController extends ChangeNotifier with WidgetsBindingObserver {
     _startPolling();
   }
 
-  void _showMissing(String t, String text) {
-    missingTitle = t;
+  void _showMissing(String missingHeading, String text) {
+    missingTitle = missingHeading;
     missingText = text;
     view = 'missing';
     _changed();
   }
 
   void _showLocked(String? message) {
-    lockedText = message ?? 'Enter the password set when this event was made.';
+    if (message == null) {
+      lockedText = 'Enter the password set when this event was made.';
+    } else {
+      lockedText = message;
+    }
     view = 'locked';
     _changed();
   }
 
   void _startPolling() {
-    _poll?.cancel();
-    _poll = Timer.periodic(_pollEvery, (_) {
+    final oldTimer = _pollTimer;
+    if (oldTimer != null) {
+      oldTimer.cancel();
+    }
+    _pollTimer = Timer.periodic(_pollInterval, (_) {
       if (_resumed && event != null && !ended) refresh();
     });
   }
@@ -248,27 +300,39 @@ class HostController extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   /// Why a request didn't reach a usable answer, if that's what happened.
-  static String? _failure(ApiResult r) {
-    if (r.offline) return 'offline';
-    if (r.status >= 500) return 'unavailable';
+  static String? _failureOf(ApiResult result) {
+    if (result.offline) return 'offline';
+    if (result.status >= 500) return 'unavailable';
     return null;
   }
 
+  /// Takes in the event and its list, from the server or (with [fromCache]) this device's saved
+  /// copy. A fresh one is saved, and handed to notifications and the home screen widget.
   void _applySnapshot(Map<String, dynamic> snapshot, {bool fromCache = false}) {
     event = Map<String, dynamic>.from(snapshot['event'] as Map);
     final list = snapshot['attendees'];
     attendees = [
       if (list is List)
-        for (final a in list)
-          if (a is Map) Attendee.from(a),
+        for (final entry in list)
+          if (entry is Map) Attendee.from(entry),
     ];
-    savedAt = fromCache ? snapshot['savedAt'] as String? : DateTime.now().toUtc().toIso8601String();
+    if (fromCache) {
+      savedAt = snapshot['savedAt'] as String?;
+    } else {
+      savedAt = DateTime.now().toUtc().toIso8601String();
+    }
     if (!fromCache) {
       _persist();
       HereStore.saveHosted(code, hostKey!, event);
       // Check-ins by location reach this phone while the app is closed, until the event ends.
       HostAlerts.watch(hostKey!, !ended);
-      AppWidgetData.tell(code, hostKey!, event!, (list as List?) ?? const []);
+      List<dynamic> attendeeList;
+      if (list == null) {
+        attendeeList = const [];
+      } else {
+        attendeeList = list as List;
+      }
+      AppWidgetData.tell(code, hostKey!, event!, attendeeList);
     }
     view = 'host';
     _changed();
@@ -280,26 +344,31 @@ class HostController extends ChangeNotifier with WidgetsBindingObserver {
 
   void _persist() {
     if (event == null) return;
-    HereStore.saveHostCache(code, event!, [for (final a in attendees) _attendeeJson(a)]);
+    HereStore.saveHostCache(code, event!, [for (final attendee in attendees) _attendeeJson(attendee)]);
   }
 
-  static Map<String, dynamic> _attendeeJson(Attendee a) => {
-    'id': a.id,
-    'name': a.name,
-    'note': a.note,
-    'method': a.method,
-    'distance': a.distance,
-    'checkedInAt': a.checkedInAt,
-    'leftEarlyAt': a.leftEarlyAt,
-  };
+  static Map<String, dynamic> _attendeeJson(Attendee attendee) {
+    return {
+      'id': attendee.id,
+      'name': attendee.name,
+      'note': attendee.note,
+      'method': attendee.method,
+      'distance': attendee.distance,
+      'checkedInAt': attendee.checkedInAt,
+      'leftEarlyAt': attendee.leftEarlyAt,
+    };
+  }
 
-  void _upsert(Map attendee) {
-    final a = Attendee.from(attendee);
-    final i = attendees.indexWhere((x) => x.id == a.id);
-    if (i == -1) {
-      attendees.add(a);
+  /// Adds this attendee to the list, or replaces the row with the same id.
+  void _upsert(Map attendeeFields) {
+    final attendee = Attendee.from(attendeeFields);
+    final index = attendees.indexWhere((existing) {
+      return existing.id == attendee.id;
+    });
+    if (index == -1) {
+      attendees.add(attendee);
     } else {
-      attendees[i] = a;
+      attendees[index] = attendee;
     }
     _persist();
   }
@@ -330,51 +399,69 @@ class HostController extends ChangeNotifier with WidgetsBindingObserver {
     );
   }
 
+  /// Sends the outbox, then asks the server for the event and its list.
   Future<void> refresh() async {
     if (hostKey == null || _disposed) return;
     await flushOutbox();
-    final r = await Api.post('host', {'code': code, 'hostKey': hostKey, 'action': 'get'});
+    final result = await Api.post('host', {'code': code, 'hostKey': hostKey, 'action': 'get'});
     if (_disposed) return;
-    if (r.ok) {
+    if (result.ok) {
       _setConnection('ok');
-      _applySnapshot(r.map);
+      _applySnapshot(result.map);
       return;
     }
-    final f = _failure(r);
-    if (f != null) return _setConnection(f);
-    if (r.reason == 'not-host') return _loseAccess();
-    if (r.reason == 'not-found') return _eventGone();
+    final failure = _failureOf(result);
+    if (failure != null) {
+      _setConnection(failure);
+      return;
+    }
+    if (result.reason == 'not-host') {
+      _loseAccess();
+      return;
+    }
+    if (result.reason == 'not-found') {
+      _eventGone();
+      return;
+    }
   }
 
   /// A host action that answers with the whole snapshot: null when it worked, else what to say.
   Future<String?> mutate(String action, Map<String, dynamic> extra, String offlineMessage) async {
-    final r = await Api.post('host', {'code': code, 'hostKey': hostKey, 'action': action, ...extra});
-    if (r.ok) {
+    final result = await Api.post('host', {'code': code, 'hostKey': hostKey, 'action': action, ...extra});
+    if (result.ok) {
       _setConnection('ok');
-      _applySnapshot(r.map);
+      _applySnapshot(result.map);
       return null;
     }
-    final f = _failure(r);
-    if (f != null) {
-      _setConnection(f);
-      return f == 'offline' ? offlineMessage : r.error;
+    final failure = _failureOf(result);
+    if (failure != null) {
+      _setConnection(failure);
+      if (failure == 'offline') {
+        return offlineMessage;
+      } else {
+        return result.error;
+      }
     }
-    if (r.reason == 'not-host') {
+    if (result.reason == 'not-host') {
       _loseAccess();
-      return r.error;
+      return result.error;
     }
-    if (r.reason == 'ended') {
+    if (result.reason == 'ended') {
       await refresh();
       return 'This event has already ended.';
     }
-    return r.error;
+    return result.error;
   }
 
   // ---- the outbox: check-ins taken while the server was out of reach ----
 
+  /// A random id for an outbox item: "local-" and 32 hexadecimal digits.
   String _localId() {
-    final r = math.Random.secure();
-    return 'local-${List.generate(16, (_) => r.nextInt(256).toRadixString(16).padLeft(2, '0')).join()}';
+    final random = math.Random.secure();
+    final hexadecimalPairs = List.generate(16, (_) {
+      return random.nextInt(256).toRadixString(16).padLeft(2, '0');
+    });
+    return 'local-${hexadecimalPairs.join()}';
   }
 
   void _queue(String kind, Map<String, dynamic> payload) {
@@ -383,8 +470,12 @@ class HostController extends ChangeNotifier with WidgetsBindingObserver {
     _changed();
   }
 
-  int get pendingCount => HereStore.outbox(code).length;
+  int get pendingCount {
+    return HereStore.outbox(code).length;
+  }
 
+  /// Sends what's waiting in the outbox, oldest first, stopping at the first one that still
+  /// can't get through.
   Future<void> flushOutbox() async {
     if (_flushing || hostKey == null) return;
     _flushing = true;
@@ -393,16 +484,18 @@ class HostController extends ChangeNotifier with WidgetsBindingObserver {
       while (items.isNotEmpty) {
         final item = items.first;
         final payload = Map<String, dynamic>.from(item['payload'] as Map);
-        final r = await Api.post('host', {'code': code, 'hostKey': hostKey, 'action': item['kind'], ...payload});
+        final result = await Api.post('host', {'code': code, 'hostKey': hostKey, 'action': item['kind'], ...payload});
         // Still unreachable, or this device lost its key: keep everything for the next attempt
         // rather than dropping somebody's check-in.
-        if (!r.ok && (_failure(r) != null || r.reason == 'not-host')) break;
-        if (r.ok) {
-          _upsert(r.map['attendee'] as Map);
-        } else if (r.reason != 'ended') {
-          AppNav.toast('Could not save ${payload['name']}: ${r.error}');
+        if (!result.ok && (_failureOf(result) != null || result.reason == 'not-host')) break;
+        if (result.ok) {
+          _upsert(result.map['attendee'] as Map);
+        } else if (result.reason != 'ended') {
+          AppNav.toast('Could not save ${payload['name']}: ${result.error}');
         }
-        items = HereStore.outbox(code).where((i) => i['localId'] != item['localId']).toList();
+        items = HereStore.outbox(code).where((outboxItem) {
+          return outboxItem['localId'] != item['localId'];
+        }).toList();
         HereStore.saveOutbox(code, items);
       }
     } finally {
@@ -413,101 +506,147 @@ class HostController extends ChangeNotifier with WidgetsBindingObserver {
 
   // ------------------------------------------------------------------ the list
 
+  /// Everyone to show: the server's list and the outbox's, newest check-in first.
   List<Attendee> displayList() {
-    final pending = [
-      for (final item in HereStore.outbox(code))
+    final pending = <Attendee>[];
+    for (final item in HereStore.outbox(code)) {
+      final payload = item['payload'] as Map;
+      String method;
+      if (item['kind'] == 'record') {
+        method = _textOrDefault(payload['method'], 'p2p');
+      } else {
+        method = 'manual';
+      }
+      pending.add(
         Attendee(
           id: '${item['localId']}',
-          name: '${(item['payload'] as Map)['name'] ?? ''}',
-          note: (item['payload'] as Map)['note'] as String?,
-          method: item['kind'] == 'record' ? '${(item['payload'] as Map)['method'] ?? 'p2p'}' : 'manual',
-          checkedInAt: '${(item['payload'] as Map)['at'] ?? ''}',
+          name: _textOrDefault(payload['name'], ''),
+          note: payload['note'] as String?,
+          method: method,
+          checkedInAt: _textOrDefault(payload['at'], ''),
           pending: true,
         ),
-    ];
-    return [...attendees, ...pending]..sort((a, b) => b.checkedInAt.compareTo(a.checkedInAt));
+      );
+    }
+    return [...attendees, ...pending]..sort((first, second) {
+      return second.checkedInAt.compareTo(first.checkedInAt);
+    });
   }
 
   /// The sync banner's sentence and whether it's a warning, or null for none.
   ({String text, bool warn})? get syncBanner {
     final pending = pendingCount;
-    final s = pending == 1 ? '' : 's';
-    final waiting = pending > 0 ? ' $pending check-in$s saved on this device will be sent when the connection is back.' : '';
+    String pluralEnding;
+    if (pending == 1) {
+      pluralEnding = '';
+    } else {
+      pluralEnding = 's';
+    }
+    String waiting;
+    if (pending > 0) {
+      waiting = ' $pending check-in$pluralEnding saved on this device will be sent when the connection is back.';
+    } else {
+      waiting = '';
+    }
     if (connection == 'offline') return (text: 'Offline. Showing the list from ${formatTime(savedAt)}.$waiting', warn: true);
     if (connection == 'unavailable') {
       return (text: 'Cannot reach uwuHere right now. Showing the list from ${formatTime(savedAt)}.$waiting', warn: true);
     }
-    if (pending > 0) return (text: 'Sending $pending saved check-in$s.', warn: false);
+    if (pending > 0) return (text: 'Sending $pending saved check-in$pluralEnding.', warn: false);
     return null;
   }
 
   String get endedBanner {
-    final at = '${event?['endedAt'] ?? ''}';
-    final end = parseTime(at);
-    final purge = end == null ? '' : formatDateTime(end.add(const Duration(days: purgeAfterEndDays)).toUtc().toIso8601String());
-    return 'Ended ${formatDateTime(at)}. The list can be downloaded here until $purge, then it is deleted.';
+    final endedAtText = _textOrDefault(_eventValue('endedAt'), '');
+    final endedAt = parseTime(endedAtText);
+    String purgeDate;
+    if (endedAt == null) {
+      purgeDate = '';
+    } else {
+      purgeDate = formatDateTime(endedAt.add(const Duration(days: purgeAfterEndDays)).toUtc().toIso8601String());
+    }
+    return 'Ended ${formatDateTime(endedAtText)}. The list can be downloaded here until $purgeDate, then it is deleted.';
   }
 
-  String get locationText => event?['hasLocation'] == true
-      ? "Location check-in within ${event?['radius']} m of this event's spot."
-      : 'Location check-in is on, but no spot is set. Set one in Event settings.';
+  String get locationText {
+    if (_eventValue('hasLocation') == true) {
+      return "Location check-in within ${_eventValue('radius')} m of this event's spot.";
+    } else {
+      return 'Location check-in is on, but no spot is set. Set one in Event settings.';
+    }
+  }
 
   // ------------------------------------------------------------------ same wifi
 
-  bool get _wantP2p => event != null && event!['allowP2p'] == true && !ended && hostKey != null;
+  bool get _wantP2p {
+    return event != null && event!['allowP2p'] == true && !ended && hostKey != null;
+  }
 
   void syncP2p() {
-    if (_wantP2p && _host == null && _retryTimer == null) _startP2p();
-    if (!_wantP2p && (_host != null || _retryTimer != null)) _stopP2p();
+    if (_wantP2p && _p2pHost == null && _retryTimer == null) _startP2p();
+    if (!_wantP2p && (_p2pHost != null || _retryTimer != null)) _stopP2p();
     _changed();
   }
 
+  /// Starts answering same-wifi check-ins under this event's code. When the code is still held
+  /// (usually by this page a moment ago), waits and tries again a few times.
   Future<void> _startP2p() async {
-    late final P2pHost mine;
-    mine = P2pHost(
+    late final P2pHost newHost;
+    newHost = P2pHost(
       maxGuests: 40,
-      onStatus: (s) {
-        if (_host != mine) return;
+      onStatus: (newStatus) {
+        if (_p2pHost != newHost) return;
         // Something else holds this code: usually this same page a moment ago, while the broker
         // hasn't let the id go yet. The code can't change, so wait and try again a few times.
-        if (s.taken && _takenRetries < _maxTakenRetries) {
-          _takenRetries += 1;
-          _host = null;
-          mine.close();
+        if (newStatus.taken && _takenRetries < _maximumTakenRetries) {
+          _takenRetries = _takenRetries + 1;
+          _p2pHost = null;
+          newHost.close();
           p2p = const P2pStatus('connecting');
-          _retryTimer = Timer(_takenRetryAfter, () {
+          _retryTimer = Timer(_takenRetryDelay, () {
             _retryTimer = null;
             syncP2p();
           });
           _changed();
           return;
         }
-        if (s.status == 'waiting' || s.status == 'connected') _takenRetries = 0;
-        p2p = s.taken ? const P2pStatus('error', message: 'This event is already open on another screen. Same-wifi check-ins go to that one.') : s;
+        if (newStatus.status == 'waiting' || newStatus.status == 'connected') _takenRetries = 0;
+        if (newStatus.taken) {
+          p2p = const P2pStatus('error', message: 'This event is already open on another screen. Same-wifi check-ins go to that one.');
+        } else {
+          p2p = newStatus;
+        }
         _changed();
         updateWakeLock();
       },
-      onMessage: (m, from) => _onPeerMessage(m, from, mine),
+      onMessage: (message, from) {
+        _onPeerMessage(message, from, newHost);
+      },
     );
-    _host = mine;
+    _p2pHost = newHost;
     p2p = const P2pStatus('connecting');
     _changed();
     try {
-      await mine.start(code);
+      await newHost.start(code);
     } catch (_) {
-      if (_host != mine) return;
-      _host = null;
+      if (_p2pHost != newHost) return;
+      _p2pHost = null;
       p2p = const P2pStatus('error', message: 'Could not load same-wifi check-in. Check your connection.');
       _changed();
     }
   }
 
   void _stopP2p() {
-    _retryTimer?.cancel();
+    final retryTimer = _retryTimer;
+    if (retryTimer != null) {
+      retryTimer.cancel();
+    }
     _retryTimer = null;
-    final old = _host;
-    _host = null;
-    old?.close();
+    final oldHost = _p2pHost;
+    _p2pHost = null;
+    if (oldHost != null) {
+      oldHost.close();
+    }
     p2p = const P2pStatus('idle');
     _changed();
     updateWakeLock();
@@ -526,12 +665,26 @@ class HostController extends ChangeNotifier with WidgetsBindingObserver {
       case 'connected':
         return const StatusRow('ok', 'Ready for same-wifi check-ins. Keep this page open.');
       case 'connecting':
-        final off = Api.offline.value;
-        return StatusRow(off ? 'warn' : '', off ? 'Same-wifi check-in needs a connection to start.' : 'Starting same-wifi check-in.');
+        final offline = Api.offline.value;
+        if (offline) {
+          return const StatusRow('warn', 'Same-wifi check-in needs a connection to start.');
+        } else {
+          return const StatusRow('', 'Starting same-wifi check-in.');
+        }
       case 'error':
-        return StatusRow('error', p2p.message.isEmpty ? 'Same-wifi check-in stopped.' : p2p.message, action: 'Retry', onAction: restartP2p);
+        String errorText;
+        if (p2p.message.isEmpty) {
+          errorText = 'Same-wifi check-in stopped.';
+        } else {
+          errorText = p2p.message;
+        }
+        return StatusRow('error', errorText, action: 'Retry', onAction: restartP2p);
       default:
-        return StatusRow('', 'Same-wifi check-in is not running.', action: _wantP2p ? 'Retry' : null, onAction: _wantP2p ? restartP2p : null);
+        if (_wantP2p) {
+          return StatusRow('', 'Same-wifi check-in is not running.', action: 'Retry', onAction: restartP2p);
+        } else {
+          return const StatusRow('', 'Same-wifi check-in is not running.');
+        }
     }
   }
 
@@ -552,48 +705,70 @@ class HostController extends ChangeNotifier with WidgetsBindingObserver {
     if (event == null || ended) return {'type': 'refused', 'reason': 'ended', 'message': 'This event has ended.'};
     if (paused) return {'type': 'refused', 'reason': 'paused', 'message': 'The host has paused check-ins for now.'};
 
-    final dh = message['deviceHash'];
-    final deviceHash = dh is String && RegExp(r'^[0-9a-f]{64}$').hasMatch(dh) ? dh : null;
+    final rawDeviceHash = message['deviceHash'];
+    String? deviceHash;
+    if (rawDeviceHash is String && RegExp(r'^[0-9a-f]{64}$').hasMatch(rawDeviceHash)) {
+      deviceHash = rawDeviceHash;
+    } else {
+      deviceHash = null;
+    }
     final name = cleanLine(message['name'], limitName);
-    final note = noteLabel != null ? cleanLine(message['note'] ?? '', limitNote) : '';
+    String? note;
+    if (noteLabel != null) {
+      Object? rawNote = message['note'];
+      if (rawNote == null) {
+        rawNote = '';
+      }
+      note = cleanLine(rawNote, limitNote);
+    } else {
+      note = '';
+    }
     if (deviceHash == null || name == null || name.isEmpty || note == null) {
       return {'type': 'refused', 'reason': 'invalid', 'message': 'That check-in was missing a name.'};
     }
 
     // Already waiting in the outbox from this device: the same answer again.
-    for (final i in HereStore.outbox(code)) {
-      if (i['kind'] == 'record' && (i['payload'] as Map)['deviceHash'] == deviceHash) {
-        return {'type': 'checked-in', 'at': (i['payload'] as Map)['at']};
+    for (final item in HereStore.outbox(code)) {
+      if (item['kind'] == 'record' && (item['payload'] as Map)['deviceHash'] == deviceHash) {
+        return {'type': 'checked-in', 'at': (item['payload'] as Map)['at']};
       }
     }
 
+    String? noteToSend;
+    if (note.isEmpty) {
+      noteToSend = null;
+    } else {
+      noteToSend = note;
+    }
     final payload = <String, dynamic>{
       'deviceHash': deviceHash,
       'name': name,
-      'note': note.isEmpty ? null : note,
+      'note': noteToSend,
       'at': DateTime.now().toUtc().toIso8601String(),
       'method': method,
     };
-    final r = await Api.post('host', {'code': code, 'hostKey': hostKey, 'action': 'record', ...payload});
-    if (r.ok) {
+    final result = await Api.post('host', {'code': code, 'hostKey': hostKey, 'action': 'record', ...payload});
+    if (result.ok) {
       _setConnection('ok');
-      final a = r.map['attendee'] as Map;
-      _upsert(a);
+      final attendeeFields = result.map['attendee'] as Map;
+      _upsert(attendeeFields);
       _changed();
-      return {'type': 'checked-in', 'at': a['checkedInAt']};
+      return {'type': 'checked-in', 'at': attendeeFields['checkedInAt']};
     }
-    final f = _failure(r);
-    if (f != null) {
-      _setConnection(f);
+    final failure = _failureOf(result);
+    if (failure != null) {
+      _setConnection(failure);
       _queue('record', payload);
       return {'type': 'checked-in', 'at': payload['at']};
     }
-    return {'type': 'refused', 'reason': r.reason, 'message': r.error};
+    return {'type': 'refused', 'reason': result.reason, 'message': result.error};
   }
 
   // ------------------------------------------------------------------ tapping phones
 
-  bool get _wantTap => event != null && event!['allowTap'] == true && !ended && hostKey != null && Native.has('tap');
+  bool get _wantTap {
+    return event != null && event!['allowTap'] == true && !ended && hostKey != null && Native.has('tap');
+  }
 
   /// Tells the app whether to answer taps, and with which event's key. Asked again with force
   /// when the app comes back, as NFC may have been switched on meanwhile.
@@ -602,10 +777,24 @@ class HostController extends ChangeNotifier with WidgetsBindingObserver {
     if (want == _tapWanted && !force) return;
     _tapWanted = want;
     try {
-      final a = await Native.call('Here', 'tap', want ? {'on': true, 'code': code, 'hostKey': hostKey} : {'on': false});
-      tapState = '${a?['state'] ?? 'idle'}';
+      Map<String, dynamic> options;
+      if (want) {
+        options = {'on': true, 'code': code, 'hostKey': hostKey};
+      } else {
+        options = {'on': false};
+      }
+      final answer = await Native.call('Here', 'tap', options);
+      Object? state;
+      if (answer != null) {
+        state = answer['state'];
+      }
+      tapState = _textOrDefault(state, 'idle');
     } catch (_) {
-      tapState = want ? 'error' : 'idle';
+      if (want) {
+        tapState = 'error';
+      } else {
+        tapState = 'idle';
+      }
     }
     _changed();
     updateWakeLock();
@@ -614,12 +803,13 @@ class HostController extends ChangeNotifier with WidgetsBindingObserver {
   StatusRow? get tapRow {
     if (event == null || event!['allowTap'] != true || ended) return null;
     if (!Native.has('tap')) {
-      return StatusRow(
-        'warn',
-        Native.platform == 'android'
-            ? 'Update the uwuHere app to take taps.'
-            : 'Tapping phones works in the uwuHere app on an Android phone with NFC. Open this event there.',
-      );
+      String text;
+      if (Native.platform == 'android') {
+        text = 'Update the uwuHere app to take taps.';
+      } else {
+        text = 'Tapping phones works in the uwuHere app on an Android phone with NFC. Open this event there.';
+      }
+      return StatusRow('warn', text);
     }
     switch (tapState) {
       case 'ready':
@@ -629,12 +819,21 @@ class HostController extends ChangeNotifier with WidgetsBindingObserver {
           'warn',
           'NFC is off on this phone. Turn it on to take taps.',
           action: 'Turn on',
-          onAction: () => Native.tryCall('Here', 'openSettings', {'what': 'nfc'}),
+          onAction: () {
+            Native.tryCall('Here', 'openSettings', {'what': 'nfc'});
+          },
         );
       case 'unsupported':
         return const StatusRow('error', "This phone can't take taps: it has no NFC. Open this event in the app on a phone that has it.");
       case 'error':
-        return StatusRow('error', "Tapping phones didn't start.", action: 'Retry', onAction: () => syncTap(force: true));
+        return StatusRow(
+          'error',
+          "Tapping phones didn't start.",
+          action: 'Retry',
+          onAction: () {
+            syncTap(force: true);
+          },
+        );
       default:
         return const StatusRow('', 'Starting tap check-in.');
     }
@@ -642,27 +841,45 @@ class HostController extends ChangeNotifier with WidgetsBindingObserver {
 
   // ------------------------------------------------------------------ Bluetooth
 
-  bool get _wantBluetooth => event != null && event!['allowBluetooth'] == true && !ended && hostKey != null && Native.has('mesh');
+  bool get _wantBluetooth {
+    return event != null && event!['allowBluetooth'] == true && !ended && hostKey != null && Native.has('mesh');
+  }
 
   /// Advertises this event to attendees' apps, or stops. Without `ask` it never shows a permission
   /// prompt by itself: it says "needs-permission", and the row's button asks.
   Future<void> syncBluetooth({bool force = false, bool ask = false}) async {
     final want = _wantBluetooth;
-    if (want == _btWanted && !force && !ask) return;
-    _btWanted = want;
+    if (want == _bluetoothWanted && !force && !ask) return;
+    _bluetoothWanted = want;
     try {
-      final a = await Native.call('Here', 'bluetooth', want ? {'on': true, 'code': code, 'ask': ask} : {'on': false});
-      btState = '${a?['state'] ?? 'idle'}';
-      btFailed = '${a?['message'] ?? ''}';
+      Map<String, dynamic> options;
+      if (want) {
+        options = {'on': true, 'code': code, 'ask': ask};
+      } else {
+        options = {'on': false};
+      }
+      final answer = await Native.call('Here', 'bluetooth', options);
+      Object? state;
+      Object? message;
+      if (answer != null) {
+        state = answer['state'];
+        message = answer['message'];
+      }
+      bluetoothState = _textOrDefault(state, 'idle');
+      bluetoothFailure = _textOrDefault(message, '');
     } catch (_) {
-      btState = want ? 'failed' : 'idle';
-      btFailed = '';
+      if (want) {
+        bluetoothState = 'failed';
+      } else {
+        bluetoothState = 'idle';
+      }
+      bluetoothFailure = '';
     }
     _changed();
     updateWakeLock();
   }
 
-  StatusRow? get btRow {
+  StatusRow? get bluetoothRow {
     if (event == null || event!['allowBluetooth'] != true || ended) return null;
     if (Native.platform != 'android') {
       return const StatusRow('warn', 'Bluetooth check-in works with this event open in the uwuHere app on Android.');
@@ -670,31 +887,50 @@ class HostController extends ChangeNotifier with WidgetsBindingObserver {
     if (!Native.has('mesh')) {
       return const StatusRow('error', 'This phone has no Google Play services, which Bluetooth check-in needs.');
     }
-    switch (btState) {
+    switch (bluetoothState) {
       case 'ready':
         return const StatusRow('ok', 'Ready for Bluetooth. Attendees with the uwuHere app check in phone to phone. Keep this page open.');
       case 'needs-permission':
-        return StatusRow('warn', 'Bluetooth check-in needs "Nearby devices" on this phone.', action: 'Allow', onAction: () => syncBluetooth(ask: true));
+        return StatusRow(
+          'warn',
+          'Bluetooth check-in needs "Nearby devices" on this phone.',
+          action: 'Allow',
+          onAction: () {
+            syncBluetooth(ask: true);
+          },
+        );
       case 'denied':
         return StatusRow(
           'error',
           '"Nearby devices" isn\'t allowed for uwuHere. Allow it in the app\'s settings.',
           action: 'Settings',
-          onAction: () => Native.tryCall('Here', 'openSettings', {'what': 'app'}),
+          onAction: () {
+            Native.tryCall('Here', 'openSettings', {'what': 'app'});
+          },
         );
       case 'bt-off':
         return StatusRow(
           'warn',
           'Bluetooth is off on this phone. Turn it on to take Bluetooth check-ins.',
           action: 'Turn on',
-          onAction: () => Native.tryCall('Here', 'openSettings', {'what': 'bluetooth'}),
+          onAction: () {
+            Native.tryCall('Here', 'openSettings', {'what': 'bluetooth'});
+          },
         );
       case 'failed':
+        String failureText;
+        if (bluetoothFailure.isEmpty) {
+          failureText = "Bluetooth check-in didn't start.";
+        } else {
+          failureText = bluetoothFailure;
+        }
         return StatusRow(
           'error',
-          btFailed.isEmpty ? "Bluetooth check-in didn't start." : btFailed,
+          failureText,
           action: 'Retry',
-          onAction: () => syncBluetooth(force: true),
+          onAction: () {
+            syncBluetooth(force: true);
+          },
         );
       default:
         return const StatusRow('', 'Starting Bluetooth check-in.');
@@ -703,7 +939,9 @@ class HostController extends ChangeNotifier with WidgetsBindingObserver {
 
   // ------------------------------------------------------------------ the hotspot
 
-  bool get hotspotAvailable => Native.has('hotspot');
+  bool get hotspotAvailable {
+    return Native.has('hotspot');
+  }
 
   StatusRow? get hotspotRow {
     if (event == null || ended || !hotspotAvailable) return null;
@@ -713,7 +951,7 @@ class HostController extends ChangeNotifier with WidgetsBindingObserver {
       case 'starting':
         return const StatusRow('', 'Starting the hotspot.', action: 'Start');
       case 'failed':
-        return StatusRow('error', '${hotspot['message'] ?? "The hotspot didn't start."}', action: 'Try again', onAction: startHotspot);
+        return StatusRow('error', _textOrDefault(hotspot['message'], "The hotspot didn't start."), action: 'Try again', onAction: startHotspot);
       default:
         return StatusRow('none', 'No internet for attendees? This phone can be their wifi.', action: 'Start', onAction: startHotspot);
     }
@@ -721,10 +959,18 @@ class HostController extends ChangeNotifier with WidgetsBindingObserver {
 
   /// WIFI:T:WPA;S:name;P:password;; is what phone cameras read as "join this wifi".
   String get wifiQrText {
-    String esc(Object? s) => '${s ?? ''}'.replaceAllMapped(RegExp(r'([\\;,:"])'), (m) => '\\${m[1]}');
-    return hotspot['security'] == 'nopass'
-        ? 'WIFI:T:nopass;S:${esc(hotspot['ssid'])};;'
-        : 'WIFI:T:${hotspot['security'] ?? 'WPA'};S:${esc(hotspot['ssid'])};P:${esc(hotspot['password'])};;';
+    // A backslash goes before each character that means something in that text.
+    String escape(Object? value) {
+      return _textOrDefault(value, '').replaceAllMapped(RegExp(r'([\\;,:"])'), (match) {
+        return '\\${match[1]}';
+      });
+    }
+
+    if (hotspot['security'] == 'nopass') {
+      return 'WIFI:T:nopass;S:${escape(hotspot['ssid'])};;';
+    } else {
+      return 'WIFI:T:${_textOrDefault(hotspot['security'], 'WPA')};S:${escape(hotspot['ssid'])};P:${escape(hotspot['password'])};;';
+    }
   }
 
   void showHotspot() {
@@ -733,22 +979,38 @@ class HostController extends ChangeNotifier with WidgetsBindingObserver {
     brightness(true);
   }
 
+  /// Asks the app to start this phone's hotspot for the event, and shows its codes once it's on.
   Future<void> startHotspot() async {
     if (event == null || ended || hotspot['status'] == 'starting') return;
     hotspot = {'status': 'starting'};
     _changed();
     try {
-      final a = await Native.call('Here', 'hotspot', {
+      final currentNoteLabel = noteLabel;
+      String noteLabelToSend;
+      if (currentNoteLabel == null) {
+        noteLabelToSend = '';
+      } else {
+        noteLabelToSend = currentNoteLabel;
+      }
+      final answer = await Native.call('Here', 'hotspot', {
         'on': true,
         'code': code,
         'title': title,
         'buttonLabel': event!['buttonLabel'],
         'buttonColor': event!['buttonColor'],
-        'noteLabel': noteLabel ?? '',
+        'noteLabel': noteLabelToSend,
       });
-      hotspot = a?['state'] == 'on' ? {...a!, 'status': 'on'} : {'status': 'failed', 'message': a?['message']};
-    } on NativeError catch (e) {
-      hotspot = {'status': 'failed', 'message': e.message};
+      if (answer != null && answer['state'] == 'on') {
+        hotspot = {...answer, 'status': 'on'};
+      } else {
+        Object? failureMessage;
+        if (answer != null) {
+          failureMessage = answer['message'];
+        }
+        hotspot = {'status': 'failed', 'message': failureMessage};
+      }
+    } on NativeError catch (error) {
+      hotspot = {'status': 'failed', 'message': error.message};
     }
     _changed();
     updateWakeLock();
@@ -771,19 +1033,26 @@ class HostController extends ChangeNotifier with WidgetsBindingObserver {
   void updateWakeLock() {
     if (_disposed) return;
     final want =
-        ((_host != null && (p2p.status == 'waiting' || p2p.status == 'connected')) || tapState == 'ready' || btState == 'ready' || hotspot['status'] == 'on') &&
+        ((_p2pHost != null && (p2p.status == 'waiting' || p2p.status == 'connected')) ||
+            tapState == 'ready' ||
+            bluetoothState == 'ready' ||
+            hotspot['status'] == 'on') &&
         _resumed &&
         AppPages.active() == AppPages.host;
     if (want == _awake) return;
     _awake = want;
     // Refused (battery saver, a browser without a user's press): the page still works.
-    (want ? WakelockPlus.enable() : WakelockPlus.disable()).catchError((Object _) {});
+    if (want) {
+      WakelockPlus.enable().catchError((Object _) {});
+    } else {
+      WakelockPlus.disable().catchError((Object _) {});
+    }
   }
 
   /// The screen at full brightness while a code is up, so the back of a room can scan it. The
   /// phone's own setting is left alone.
-  void brightness(bool max) {
-    if (Native.has('brightness')) Native.tryCall('Here', 'brightness', {'max': max});
+  void brightness(bool maximum) {
+    if (Native.has('brightness')) Native.tryCall('Here', 'brightness', {'max': maximum});
   }
 
   // ------------------------------------------------------------------ actions
@@ -798,53 +1067,92 @@ class HostController extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   Future<void> togglePause() async {
-    final err = await mutate(paused ? 'resume' : 'pause', const {}, 'Pausing needs a connection.');
-    if (err != null) AppNav.toast(err);
+    String action;
+    if (paused) {
+      action = 'resume';
+    } else {
+      action = 'pause';
+    }
+    final errorMessage = await mutate(action, const {}, 'Pausing needs a connection.');
+    if (errorMessage != null) AppNav.toast(errorMessage);
   }
 
   /// Removes someone: null when done.
-  Future<String?> remove(Attendee a) async {
-    if (a.pending) {
-      HereStore.saveOutbox(code, HereStore.outbox(code).where((i) => i['localId'] != a.id).toList());
+  Future<String?> remove(Attendee attendee) async {
+    if (attendee.pending) {
+      final remaining = HereStore.outbox(code).where((item) {
+        return item['localId'] != attendee.id;
+      }).toList();
+      HereStore.saveOutbox(code, remaining);
       _changed();
       return null;
     }
-    return mutate('remove', {'attendeeId': a.id}, 'Removing someone needs a connection.');
+    return mutate('remove', {'attendeeId': attendee.id}, 'Removing someone needs a connection.');
   }
 
   /// Adds someone by hand: true when added or saved for later.
   Future<bool> add(String name, String note) async {
-    final payload = {'name': name, 'note': noteLabel != null && note.isNotEmpty ? note : null, 'at': DateTime.now().toUtc().toIso8601String()};
-    final r = await Api.post('host', {'code': code, 'hostKey': hostKey, 'action': 'add', ...payload});
-    if (r.ok) {
+    String? noteToSend;
+    if (noteLabel != null && note.isNotEmpty) {
+      noteToSend = note;
+    } else {
+      noteToSend = null;
+    }
+    final payload = {'name': name, 'note': noteToSend, 'at': DateTime.now().toUtc().toIso8601String()};
+    final result = await Api.post('host', {'code': code, 'hostKey': hostKey, 'action': 'add', ...payload});
+    if (result.ok) {
       _setConnection('ok');
-      _upsert(r.map['attendee'] as Map);
+      _upsert(result.map['attendee'] as Map);
       _changed();
       return true;
     }
-    final f = _failure(r);
-    if (f != null) {
-      _setConnection(f);
+    final failure = _failureOf(result);
+    if (failure != null) {
+      _setConnection(failure);
       _queue('add', payload);
       AppNav.toast('Saved on this device. It is sent when the connection is back.');
       return true;
     }
-    AppNav.toast(r.error);
+    AppNav.toast(result.error);
     return false;
   }
 
   /// The list as a CSV, with the byte order mark that makes Excel read it as UTF-8.
   String csv() {
-    final rows = <List<Object?>>[
-      ['Name', noteLabel ?? 'Note', 'Checked in', 'How', 'Distance (m)', 'Left early'],
-    ];
-    for (final a in displayList().reversed) {
-      rows.add([a.name, a.note ?? '', stamp(a.checkedInAt), methodOf(a.method).label, a.distance ?? '', stamp(a.leftEarlyAt)]);
+    final currentNoteLabel = noteLabel;
+    String noteHeading;
+    if (currentNoteLabel == null) {
+      noteHeading = 'Note';
+    } else {
+      noteHeading = currentNoteLabel;
     }
-    return '﻿${rows.map((r) => r.map(csvCell).join(',')).join('\r\n')}';
+    final rows = <List<Object?>>[
+      ['Name', noteHeading, 'Checked in', 'How', 'Distance (m)', 'Left early'],
+    ];
+    for (final attendee in displayList().reversed) {
+      String noteCell;
+      if (attendee.note == null) {
+        noteCell = '';
+      } else {
+        noteCell = attendee.note!;
+      }
+      Object distanceCell;
+      if (attendee.distance == null) {
+        distanceCell = '';
+      } else {
+        distanceCell = attendee.distance!;
+      }
+      rows.add([attendee.name, noteCell, stamp(attendee.checkedInAt), methodOf(attendee.method).label, distanceCell, stamp(attendee.leftEarlyAt)]);
+    }
+    final lines = rows.map((row) {
+      return row.map(csvCell).join(',');
+    });
+    return '﻿${lines.join('\r\n')}';
   }
 
-  String get csvName => 'uwuhere-$code-${stamp(DateTime.now().toUtc().toIso8601String()).substring(0, 10)}.csv';
+  String get csvName {
+    return 'uwuhere-$code-${stamp(DateTime.now().toUtc().toIso8601String()).substring(0, 10)}.csv';
+  }
 
   Future<void> downloadCsv() async {
     if (event == null) return;
@@ -861,46 +1169,73 @@ class HostController extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   /// Saves the settings sheet: null when saved.
-  Future<String?> saveSettings(Map<String, dynamic> settings) => mutate('update', {'settings': settings}, 'Changing settings needs a connection.');
+  Future<String?> saveSettings(Map<String, dynamic> settings) {
+    return mutate('update', {'settings': settings}, 'Changing settings needs a connection.');
+  }
 
-  Future<String?> setPassword(String password) =>
-      mutate('password', {'password': password}, password.isEmpty ? 'Removing the password needs a connection.' : 'Setting a password needs a connection.');
+  /// Sets the event's password, or removes it when [password] is empty: null when done.
+  Future<String?> setPassword(String password) {
+    String offlineMessage;
+    if (password.isEmpty) {
+      offlineMessage = 'Removing the password needs a connection.';
+    } else {
+      offlineMessage = 'Setting a password needs a connection.';
+    }
+    return mutate('password', {'password': password}, offlineMessage);
+  }
 
   /// Opens the event with its password, on a device that didn't make it: null when open.
   Future<String?> unlock(String password) async {
-    final r = await Api.post('unlock', {'code': code, 'password': password});
-    if (!r.ok) {
-      if (r.reason == 'not-found') {
+    final result = await Api.post('unlock', {'code': code, 'password': password});
+    if (!result.ok) {
+      if (result.reason == 'not-found') {
         _eventGone();
         return null;
       }
-      return r.offline ? 'Opening an event here needs a connection.' : r.error;
+      if (result.offline) {
+        return 'Opening an event here needs a connection.';
+      } else {
+        return result.error;
+      }
     }
-    hostKey = '${r.map['hostKey']}';
-    HereStore.saveHosted(code, hostKey!, Map<String, dynamic>.from(r.map['event'] as Map));
-    _applySnapshot(r.map);
+    hostKey = '${result.map['hostKey']}';
+    HereStore.saveHosted(code, hostKey!, Map<String, dynamic>.from(result.map['event'] as Map));
+    _applySnapshot(result.map);
     _startPolling();
     return null;
   }
 
   /// A spot for location check-in, from this device.
-  Future<Position2> takeSpot() => Geo.getPosition();
+  Future<Position2> takeSpot() {
+    return Geo.getPosition();
+  }
 
+  /// Stops everything this event started: polling, same wifi, taps, Bluetooth, the hotspot and
+  /// the screen staying on.
   @override
   void dispose() {
     _disposed = true;
-    _offOnline();
+    _stopListeningForOnline();
     WidgetsBinding.instance.removeObserver(this);
     AppPages.current.removeListener(updateWakeLock);
-    _poll?.cancel();
-    _retryTimer?.cancel();
-    _host?.close();
-    _host = null;
-    for (final l in _listeners) {
-      l.cancel();
+    final pollTimer = _pollTimer;
+    if (pollTimer != null) {
+      pollTimer.cancel();
+    }
+    final retryTimer = _retryTimer;
+    if (retryTimer != null) {
+      retryTimer.cancel();
+    }
+    final p2pHost = _p2pHost;
+    if (p2pHost != null) {
+      p2pHost.close();
+    }
+    _p2pHost = null;
+    for (final listener in _listeners) {
+      listener.cancel();
     }
     if (_tapWanted) Native.tryCall('Here', 'tap', {'on': false});
-    if (_btWanted) Native.tryCall('Here', 'bluetooth', {'on': false});
+    if (_bluetoothWanted) Native.tryCall('Here', 'bluetooth', {'on': false});
     if (hotspot['status'] == 'on' || hotspot['status'] == 'starting') Native.tryCall('Here', 'hotspot', {'on': false});
     if (_awake) WakelockPlus.disable().catchError((Object _) {});
     super.dispose();

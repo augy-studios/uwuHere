@@ -40,12 +40,50 @@ import {
 
 bootShell();
 
-const $ = (id) => document.getElementById(id);
+/* -------------------------------------------------------------------------
+ * Small helpers
+ * ---------------------------------------------------------------------- */
+
+// Finds an element on the page by its id.
+function getElement(id) {
+  return document.getElementById(id);
+}
+
+// Gives back `value` when it is truthy (not empty, zero, null and so on),
+// and `fallback` otherwise.
+function valueOrFallback(value, fallback) {
+  if (value) {
+    return value;
+  }
+  return fallback;
+}
+
+// Gives back `value`, or an empty string when it is null or undefined.
+function valueOrEmptyText(value) {
+  if (value === null || value === undefined) {
+    return "";
+  }
+  return value;
+}
+
+// The `message` of an error or an answer, or undefined when there is no
+// error or answer at all.
+function messageOf(errorOrAnswer) {
+  if (errorOrAnswer === null || errorOrAnswer === undefined) {
+    return undefined;
+  }
+  return errorOrAnswer.message;
+}
+
+// Does nothing. Used to ignore a failed call to the app that nobody waits on.
+function ignoreError() {}
+
 const code = normaliseCode(new URLSearchParams(location.search).get("id"));
 
-const POLL_MS = 5000;
-const TAKEN_RETRIES = 3;
-const TAKEN_RETRY_MS = 4000;
+const POLL_INTERVAL_MILLISECONDS = 5000;
+const MAXIMUM_TAKEN_RETRIES = 3;
+const TAKEN_RETRY_DELAY_MILLISECONDS = 4000;
+const MILLISECONDS_PER_DAY = 86400000;
 const LIMITS = { title: 80, buttonLabel: 20, noteLabel: 40, name: 60, note: 120 };
 
 let hostKey = null;
@@ -58,8 +96,8 @@ let flushing = false;
 let lastListKey = "";
 
 let host = null;
-let p2p = { status: "idle", message: "" };
-let takenRetries = 0;
+let p2pState = { status: "idle", message: "" };
+let takenRetryCount = 0;
 let retryTimer = null;
 let wakeLock = null;
 
@@ -69,8 +107,8 @@ let tapState = "idle";
 let tapWanted = false;
 // What the app last said about Bluetooth check-in (Mesh.java): "idle",
 // "ready", "needs-permission", "denied", "bt-off", "unsupported" or "failed".
-let btState = "idle";
-let btWanted = false;
+let bluetoothState = "idle";
+let bluetoothWanted = false;
 
 // Whether the app has said what it can do yet (AppBridge.ready, at boot).
 let bridgeHeard = !AppBridge.native;
@@ -79,27 +117,35 @@ let bridgeHeard = !AppBridge.native;
  * Views
  * ---------------------------------------------------------------------- */
 
+// Shows one of the page's three views and hides the others, along with the
+// tray buttons that only make sense while hosting.
 function show(view) {
-  for (const id of ["missingView", "lockedView", "hostView"]) $(id).hidden = id !== view;
-  const hosting = view === "hostView" && event;
-  $("qrTrayBtn").hidden = !hosting || event.ended;
-  $("settingsBtn").hidden = !hosting || event.ended;
-  $("csvTrayBtn").hidden = !hosting;
-  if (!hosting || event.ended) closeIfOpen("qrModal");
+  for (const id of ["missingView", "lockedView", "hostView"]) {
+    getElement(id).hidden = id !== view;
+  }
+  const hosting = view === "hostView" && Boolean(event);
+  getElement("qrTrayBtn").hidden = !hosting || event.ended;
+  getElement("settingsBtn").hidden = !hosting || event.ended;
+  getElement("csvTrayBtn").hidden = !hosting;
+  if (!hosting || event.ended) {
+    closeIfOpen("qrModal");
+  }
 }
 
 function closeIfOpen(id) {
-  if (!$(id).classList.contains("hidden")) closeModal(id);
+  if (!getElement(id).classList.contains("hidden")) {
+    closeModal(id);
+  }
 }
 
 function showMissing(title, text) {
-  $("missingTitle").textContent = title;
-  $("missingText").textContent = text;
+  getElement("missingTitle").textContent = title;
+  getElement("missingText").textContent = text;
   show("missingView");
 }
 
 function showLocked(message) {
-  $("lockedText").textContent = message || "Enter the password set when this event was made.";
+  getElement("lockedText").textContent = valueOrFallback(message, "Enter the password set when this event was made.");
   show("lockedView");
 }
 
@@ -114,15 +160,30 @@ function setConnection(state) {
 
 // Why a request did not reach a usable answer, if that is what happened.
 function connectionFailure(result) {
-  if (result.offline) return "offline";
-  if (result.status >= 500) return "unavailable";
+  if (result.offline) {
+    return "offline";
+  }
+  if (result.status >= 500) {
+    return "unavailable";
+  }
   return null;
 }
 
+// Takes a whole copy of the event and its list, from the server or from the
+// copy kept on this device, and brings the page and everything that hangs
+// off it (storage, notifications, widget, P2P, taps, Bluetooth) up to date.
 function applySnapshot(snapshot, { fromCache = false } = {}) {
   event = snapshot.event;
-  attendees = Array.isArray(snapshot.attendees) ? snapshot.attendees : [];
-  savedAt = fromCache ? snapshot.savedAt : new Date().toISOString();
+  if (Array.isArray(snapshot.attendees)) {
+    attendees = snapshot.attendees;
+  } else {
+    attendees = [];
+  }
+  if (fromCache) {
+    savedAt = snapshot.savedAt;
+  } else {
+    savedAt = new Date().toISOString();
+  }
   if (!fromCache) {
     store.saveHostCache(code, { event, attendees });
     store.saveHosted(code, hostKey, event);
@@ -142,10 +203,17 @@ function persist() {
   store.saveHostCache(code, { event, attendees });
 }
 
-function upsertAttendee(attendee) {
-  const i = attendees.findIndex((a) => a.id === attendee.id);
-  if (i === -1) attendees.push(attendee);
-  else attendees[i] = attendee;
+// Puts an attendee in the list, replacing the one with the same id if there
+// is one already.
+function addOrReplaceAttendee(attendee) {
+  const existingIndex = attendees.findIndex((listedAttendee) => {
+    return listedAttendee.id === attendee.id;
+  });
+  if (existingIndex === -1) {
+    attendees.push(attendee);
+  } else {
+    attendees[existingIndex] = attendee;
+  }
   persist();
 }
 
@@ -174,8 +242,12 @@ function eventGone() {
   );
 }
 
+// Sends anything waiting in the outbox, then fetches the latest copy of the
+// event from the server.
 async function refresh() {
-  if (!hostKey) return;
+  if (!hostKey) {
+    return;
+  }
   await flushOutbox();
 
   const result = await postJson("host", { code, hostKey, action: "get" });
@@ -186,14 +258,23 @@ async function refresh() {
   }
 
   const failure = connectionFailure(result);
-  if (failure) return setConnection(failure);
-  if (result.reason === "not-host") return loseAccess();
-  if (result.reason === "not-found") return eventGone();
+  if (failure) {
+    setConnection(failure);
+    return;
+  }
+  if (result.reason === "not-host") {
+    loseAccess();
+    return;
+  }
+  if (result.reason === "not-found") {
+    eventGone();
+    return;
+  }
 }
 
 /** A host action that answers with the whole snapshot. */
-async function mutate(action, extra, offlineMessage) {
-  const result = await postJson("host", { code, hostKey, action, ...extra });
+async function mutate(action, extraFields, offlineMessage) {
+  const result = await postJson("host", { code, hostKey, action, ...extraFields });
   if (result.ok) {
     setConnection("ok");
     applySnapshot(result.data);
@@ -203,7 +284,13 @@ async function mutate(action, extra, offlineMessage) {
   const failure = connectionFailure(result);
   if (failure) {
     setConnection(failure);
-    return { ok: false, error: failure === "offline" ? offlineMessage : result.error };
+    let errorMessage;
+    if (failure === "offline") {
+      errorMessage = offlineMessage;
+    } else {
+      errorMessage = result.error;
+    }
+    return { ok: false, error: errorMessage };
   }
   if (result.reason === "not-host") {
     loseAccess();
@@ -225,24 +312,35 @@ function queue(kind, payload) {
   render();
 }
 
+// Sends the outbox to the server, oldest first. Stops (and keeps the rest)
+// as soon as the server is out of reach again.
 async function flushOutbox() {
-  if (flushing || !hostKey) return;
+  if (flushing || !hostKey) {
+    return;
+  }
   flushing = true;
 
   try {
     let items = store.getOutbox(code);
     while (items.length > 0) {
-      const item = items[0];
-      const result = await postJson("host", { code, hostKey, action: item.kind, ...item.payload });
+      const firstItem = items[0];
+      const result = await postJson("host", { code, hostKey, action: firstItem.kind, ...firstItem.payload });
 
       // Still unreachable, or this browser lost its key: keep everything for
       // the next attempt rather than dropping somebody's check-in.
-      if (!result.ok && (connectionFailure(result) || result.reason === "not-host")) break;
+      if (!result.ok && (connectionFailure(result) || result.reason === "not-host")) {
+        break;
+      }
 
-      if (result.ok) upsertAttendee(result.data.attendee);
-      else if (result.reason !== "ended") toast(`Could not save ${item.payload.name}: ${result.error}`);
+      if (result.ok) {
+        addOrReplaceAttendee(result.data.attendee);
+      } else if (result.reason !== "ended") {
+        toast(`Could not save ${firstItem.payload.name}: ${result.error}`);
+      }
 
-      items = store.getOutbox(code).filter((i) => i.localId !== item.localId);
+      items = store.getOutbox(code).filter((queuedItem) => {
+        return queuedItem.localId !== firstItem.localId;
+      });
       store.saveOutbox(code, items);
     }
   } finally {
@@ -265,68 +363,102 @@ const METHOD = {
   hotspot: { icon: "hotspot", label: "Host's hotspot" },
 };
 
+// How a check-in method is shown, falling back to "Added by hand" for a
+// method this page does not know.
+function methodFor(methodName) {
+  const method = METHOD[methodName];
+  if (method === null || method === undefined) {
+    return METHOD.manual;
+  }
+  return method;
+}
+
 function joinLink() {
   return `${location.origin}/join?id=${code}`;
 }
 
+// The list as shown: the server's attendees plus the check-ins still waiting
+// in the outbox, newest first.
 function displayList() {
-  const pending = store.getOutbox(code).map((item) => ({
-    id: item.localId,
-    name: item.payload.name,
-    note: item.payload.note,
-    method: item.kind === "record" ? item.payload.method || "p2p" : "manual",
-    distance: null,
-    checkedInAt: item.payload.at,
-    leftEarlyAt: null,
-    pending: true,
-  }));
-  return [...attendees, ...pending].sort((a, b) => String(b.checkedInAt).localeCompare(String(a.checkedInAt)));
+  const pending = store.getOutbox(code).map((item) => {
+    let method;
+    if (item.kind === "record") {
+      method = valueOrFallback(item.payload.method, "p2p");
+    } else {
+      method = "manual";
+    }
+    return {
+      id: item.localId,
+      name: item.payload.name,
+      note: item.payload.note,
+      method: method,
+      distance: null,
+      checkedInAt: item.payload.at,
+      leftEarlyAt: null,
+      pending: true,
+    };
+  });
+  const combined = [...attendees, ...pending];
+  return combined.sort((first, second) => {
+    return String(second.checkedInAt).localeCompare(String(first.checkedInAt));
+  });
 }
 
+// Draws the whole host view from `event` and the list.
 function render() {
-  if (!event) return;
+  if (!event) {
+    return;
+  }
   show("hostView");
 
   const ended = event.ended;
-  document.title = `${event.title || code} | uwuHere`;
-  $("eventTitle").textContent = event.title || "Untitled event";
+  document.title = `${valueOrFallback(event.title, code)} | uwuHere`;
+  getElement("eventTitle").textContent = valueOrFallback(event.title, "Untitled event");
 
   const link = joinLink();
-  $("codeBtn").textContent = code;
-  $("shareLink").textContent = link;
-  if ($("qrHolder").dataset.link !== link) {
-    $("qrHolder").innerHTML = qrToSvg(link);
-    $("qrHolder").dataset.link = link;
+  getElement("codeBtn").textContent = code;
+  getElement("shareLink").textContent = link;
+  if (getElement("qrHolder").dataset.link !== link) {
+    getElement("qrHolder").innerHTML = qrToSvg(link);
+    getElement("qrHolder").dataset.link = link;
   }
 
-  $("endedBanner").hidden = !ended;
+  getElement("endedBanner").hidden = !ended;
   if (ended) {
-    const purge = new Date(Date.parse(event.endedAt) + store.PURGE_AFTER_END_DAYS * 86400000).toISOString();
-    $("endedBanner").textContent =
+    const purgeDate = new Date(
+      Date.parse(event.endedAt) + store.PURGE_AFTER_END_DAYS * MILLISECONDS_PER_DAY
+    ).toISOString();
+    getElement("endedBanner").textContent =
       `Ended ${formatDateTime(event.endedAt)}. The list can be downloaded here until ` +
-      `${formatDateTime(purge)}, then it is deleted.`;
+      `${formatDateTime(purgeDate)}, then it is deleted.`;
   }
 
-  $("shareBlock").hidden = ended;
-  if (ended) stopHotspot();
-  $("pauseBtn").hidden = ended;
-  $("endBtn").hidden = ended;
-  $("addForm").hidden = ended;
-  $("pausedBanner").hidden = ended || !event.paused;
+  getElement("shareBlock").hidden = ended;
+  if (ended) {
+    stopHotspot();
+  }
+  getElement("pauseBtn").hidden = ended;
+  getElement("endBtn").hidden = ended;
+  getElement("addForm").hidden = ended;
+  getElement("pausedBanner").hidden = ended || !event.paused;
 
-  $("pauseBtn").innerHTML = event.paused
-    ? `<span data-icon="play"></span>Resume`
-    : `<span data-icon="pause"></span>Pause`;
-  hydrateIcons($("pauseBtn"));
+  if (event.paused) {
+    getElement("pauseBtn").innerHTML = `<span data-icon="play"></span>Resume`;
+  } else {
+    getElement("pauseBtn").innerHTML = `<span data-icon="pause"></span>Pause`;
+  }
+  hydrateIcons(getElement("pauseBtn"));
 
-  $("locRow").hidden = !event.allowLocation || ended;
-  $("locText").textContent = event.hasLocation
-    ? `Location check-in within ${event.radius} m of this event's spot.`
-    : "Location check-in is on, but no spot is set. Set one in Event settings.";
+  getElement("locRow").hidden = !event.allowLocation || ended;
+  if (event.hasLocation) {
+    getElement("locText").textContent = `Location check-in within ${event.radius} m of this event's spot.`;
+  } else {
+    getElement("locText").textContent = "Location check-in is on, but no spot is set. Set one in Event settings.";
+  }
 
-  $("addNote").hidden = !event.noteLabel;
-  $("addNote").placeholder = event.noteLabel || "";
-  $("addNote").setAttribute("aria-label", event.noteLabel || "Note");
+  getElement("addNote").hidden = !event.noteLabel;
+  getElement("addNote").placeholder = valueOrFallback(event.noteLabel, "");
+  getElement("addNote").setAttribute("aria-label", valueOrFallback(event.noteLabel, "Note"));
 
   renderList();
   renderSync();
@@ -336,65 +468,123 @@ function render() {
   renderHotspot();
 }
 
+// The HTML for one row of the attendee list.
+function attendeeRowHtml(attendee) {
+  const method = methodFor(attendee.method);
+
+  let methodDescription;
+  if (attendee.distance === null || attendee.distance === undefined) {
+    methodDescription = method.label;
+  } else {
+    methodDescription = `${method.label}, ${attendee.distance} m away`;
+  }
+
+  let noteHtml = "";
+  if (attendee.note) {
+    let notePrefix = "";
+    if (event.noteLabel) {
+      notePrefix = `${event.noteLabel}: `;
+    }
+    noteHtml = `<span class="attendee-note">${escapeHtml(notePrefix)}${escapeHtml(attendee.note)}</span>`;
+  }
+
+  let removeButtonHtml = "";
+  if (!event.ended) {
+    let pendingAttribute = "";
+    if (attendee.pending) {
+      pendingAttribute = 'data-pending="1"';
+    }
+    removeButtonHtml = `<button class="icon-btn small remove-btn" type="button" data-remove="${escapeHtml(attendee.id)}"
+             ${pendingAttribute} aria-label="Remove ${escapeHtml(attendee.name)}" title="Remove">
+             <span data-icon="trash"></span>
+           </button>`;
+  }
+
+  let leftEarlyChipHtml = "";
+  if (attendee.leftEarlyAt) {
+    leftEarlyChipHtml = `<span class="chip warn"><span data-icon="door"></span>Left ${formatTime(attendee.leftEarlyAt)}</span>`;
+  }
+
+  let pendingChipHtml = "";
+  if (attendee.pending) {
+    pendingChipHtml = `<span class="chip busy">Not sent yet</span>`;
+  }
+
+  return `
+        <li class="attendee">
+          <span class="attendee-main">
+            <span class="attendee-name">${escapeHtml(attendee.name)}</span>
+            ${noteHtml}
+          </span>
+          <span class="attendee-meta">
+            <span class="chip" title="${escapeHtml(methodDescription)}"><span data-icon="${method.icon}"></span>${formatTime(attendee.checkedInAt)}<span class="visually-hidden">, ${escapeHtml(methodDescription)}</span></span>
+            ${leftEarlyChipHtml}
+            ${pendingChipHtml}
+          </span>
+          ${removeButtonHtml}
+        </li>`;
+}
+
+// Draws the attendee list, but only when something in it has changed, so a
+// poll that brings nothing new does not rebuild it.
 function renderList() {
   const list = displayList();
   const key = JSON.stringify([list, event.ended, event.noteLabel]);
-  if (key === lastListKey) return;
+  if (key === lastListKey) {
+    return;
+  }
   lastListKey = key;
 
-  const left = list.filter((a) => a.leftEarlyAt).length;
-  $("listCount").textContent =
-    list.length === 0 ? "" : `${list.length} checked in${left ? `, ${left} left early` : ""}`;
-  $("emptyList").hidden = list.length > 0;
+  const leftEarlyCount = list.filter((attendee) => {
+    return attendee.leftEarlyAt;
+  }).length;
 
-  $("attendeeList").innerHTML = list
-    .map((a) => {
-      const method = METHOD[a.method] ?? METHOD.manual;
-      const how = a.distance === null || a.distance === undefined ? method.label : `${method.label}, ${a.distance} m away`;
-      const note = a.note
-        ? `<span class="attendee-note">${escapeHtml(event.noteLabel ? `${event.noteLabel}: ` : "")}${escapeHtml(a.note)}</span>`
-        : "";
-      const remove = event.ended
-        ? ""
-        : `<button class="icon-btn small remove-btn" type="button" data-remove="${escapeHtml(a.id)}"
-             ${a.pending ? 'data-pending="1"' : ""} aria-label="Remove ${escapeHtml(a.name)}" title="Remove">
-             <span data-icon="trash"></span>
-           </button>`;
+  let countText;
+  if (list.length === 0) {
+    countText = "";
+  } else {
+    let leftEarlyText = "";
+    if (leftEarlyCount) {
+      leftEarlyText = `, ${leftEarlyCount} left early`;
+    }
+    countText = `${list.length} checked in${leftEarlyText}`;
+  }
+  getElement("listCount").textContent = countText;
+  getElement("emptyList").hidden = list.length > 0;
 
-      return `
-        <li class="attendee">
-          <span class="attendee-main">
-            <span class="attendee-name">${escapeHtml(a.name)}</span>
-            ${note}
-          </span>
-          <span class="attendee-meta">
-            <span class="chip" title="${escapeHtml(how)}"><span data-icon="${method.icon}"></span>${formatTime(a.checkedInAt)}<span class="visually-hidden">, ${escapeHtml(how)}</span></span>
-            ${a.leftEarlyAt ? `<span class="chip warn"><span data-icon="door"></span>Left ${formatTime(a.leftEarlyAt)}</span>` : ""}
-            ${a.pending ? `<span class="chip busy">Not sent yet</span>` : ""}
-          </span>
-          ${remove}
-        </li>`;
+  getElement("attendeeList").innerHTML = list
+    .map((attendee) => {
+      return attendeeRowHtml(attendee);
     })
     .join("");
-  hydrateIcons($("attendeeList"));
+  hydrateIcons(getElement("attendeeList"));
 }
 
+// The banner that says the page is offline, or that saved check-ins are
+// still being sent.
 function renderSync() {
-  const banner = $("syncBanner");
-  const pending = store.getOutbox(code).length;
-  const waiting = pending
-    ? ` ${pending} check-in${pending === 1 ? "" : "s"} saved on this device will be sent when the connection is back.`
-    : "";
+  const banner = getElement("syncBanner");
+  const pendingCount = store.getOutbox(code).length;
+
+  let pluralEnding = "s";
+  if (pendingCount === 1) {
+    pluralEnding = "";
+  }
+
+  let waitingText = "";
+  if (pendingCount) {
+    waitingText = ` ${pendingCount} check-in${pluralEnding} saved on this device will be sent when the connection is back.`;
+  }
 
   if (connection === "offline") {
     banner.className = "banner warn";
-    banner.textContent = `Offline. Showing the list from ${formatTime(savedAt)}.${waiting}`;
+    banner.textContent = `Offline. Showing the list from ${formatTime(savedAt)}.${waitingText}`;
   } else if (connection === "unavailable") {
     banner.className = "banner warn";
-    banner.textContent = `Cannot reach uwuHere right now. Showing the list from ${formatTime(savedAt)}.${waiting}`;
-  } else if (pending) {
+    banner.textContent = `Cannot reach uwuHere right now. Showing the list from ${formatTime(savedAt)}.${waitingText}`;
+  } else if (pendingCount) {
     banner.className = "banner";
-    banner.textContent = `Sending ${pending} saved check-in${pending === 1 ? "" : "s"}.`;
+    banner.textContent = `Sending ${pendingCount} saved check-in${pluralEnding}.`;
   } else {
     banner.hidden = true;
     return;
@@ -411,53 +601,73 @@ function wantP2p() {
 }
 
 function syncP2p() {
-  if (wantP2p() && !host && !retryTimer) startP2p();
-  if (!wantP2p() && (host || retryTimer)) stopP2p();
+  if (wantP2p() && !host && !retryTimer) {
+    startP2p();
+  }
+  if (!wantP2p() && (host || retryTimer)) {
+    stopP2p();
+  }
   renderP2p();
 }
 
+// Opens this page to same-wifi check-ins under the event code. If the code
+// is still held (usually by this page before a reload) it waits and tries
+// again a few times.
 async function startP2p() {
-  const mine = new Host({ maxGuests: 40 });
-  host = mine;
-  p2p = { status: "connecting", message: "" };
+  const newHost = new Host({ maxGuests: 40 });
+  host = newHost;
+  p2pState = { status: "connecting", message: "" };
 
-  mine.addEventListener("status", ({ detail }) => {
-    if (host !== mine) return;
+  newHost.addEventListener("status", ({ detail }) => {
+    if (host !== newHost) {
+      return;
+    }
 
     // Something else holds this code: usually this same page a moment ago,
     // before a reload, while the broker has not let the id go yet. The event
     // code cannot change, so wait and try again a few times rather than
     // moving to a fresh code as the spec does for a pairing code.
-    if (detail.taken && takenRetries < TAKEN_RETRIES) {
-      takenRetries += 1;
+    if (detail.taken && takenRetryCount < MAXIMUM_TAKEN_RETRIES) {
+      takenRetryCount = takenRetryCount + 1;
       host = null;
-      mine.close();
-      p2p = { status: "connecting", message: "" };
+      newHost.close();
+      p2pState = { status: "connecting", message: "" };
       retryTimer = setTimeout(() => {
         retryTimer = null;
         syncP2p();
-      }, TAKEN_RETRY_MS);
+      }, TAKEN_RETRY_DELAY_MILLISECONDS);
       renderP2p();
       return;
     }
 
-    if (detail.status === "waiting" || detail.status === "connected") takenRetries = 0;
-    p2p = detail.taken
-      ? { status: "error", message: "This event is already open on another screen. Same-wifi check-ins go to that one." }
-      : detail;
+    if (detail.status === "waiting" || detail.status === "connected") {
+      takenRetryCount = 0;
+    }
+    if (detail.taken) {
+      p2pState = {
+        status: "error",
+        message: "This event is already open on another screen. Same-wifi check-ins go to that one.",
+      };
+    } else {
+      p2pState = detail;
+    }
     renderP2p();
     updateWakeLock();
   });
 
-  mine.addEventListener("message", ({ detail: { message, from } }) => onPeerMessage(message, from));
+  newHost.addEventListener("message", ({ detail: { message, from } }) => {
+    onPeerMessage(message, from);
+  });
 
   renderP2p();
   try {
-    await mine.start(code);
+    await newHost.start(code);
   } catch {
-    if (host !== mine) return;
+    if (host !== newHost) {
+      return;
+    }
     host = null;
-    p2p = { status: "error", message: "Could not load same-wifi check-in. Check your connection." };
+    p2pState = { status: "error", message: "Could not load same-wifi check-in. Check your connection." };
     renderP2p();
   }
 }
@@ -465,72 +675,100 @@ async function startP2p() {
 function stopP2p() {
   clearTimeout(retryTimer);
   retryTimer = null;
-  const old = host;
+  const previousHost = host;
   host = null;
-  old?.close();
-  p2p = { status: "idle", message: "" };
+  if (previousHost !== null && previousHost !== undefined) {
+    previousHost.close();
+  }
+  p2pState = { status: "idle", message: "" };
   renderP2p();
   updateWakeLock();
 }
 
 function restartP2p() {
   stopP2p();
-  takenRetries = 0;
+  takenRetryCount = 0;
   syncP2p();
 }
 
+// The same-wifi row: a coloured dot, a line of text, and a retry button.
 function renderP2p() {
-  const row = $("p2pRow");
+  const row = getElement("p2pRow");
   row.hidden = !event || !event.allowP2p || event.ended;
-  if (row.hidden) return;
-
-  const dot = $("p2pDot");
-  dot.className = "status-dot";
-  let text;
-  let retry = false;
-
-  switch (p2p.status) {
-    case "waiting":
-    case "connected":
-      dot.classList.add("ok");
-      text = "Ready for same-wifi check-ins. Keep this page open.";
-      break;
-    case "connecting":
-      text = navigator.onLine ? "Starting same-wifi check-in." : "Same-wifi check-in needs a connection to start.";
-      if (!navigator.onLine) dot.classList.add("warn");
-      break;
-    case "error":
-      dot.classList.add("error");
-      text = p2p.message || "Same-wifi check-in stopped.";
-      retry = true;
-      break;
-    default:
-      text = "Same-wifi check-in is not running.";
-      retry = wantP2p();
+  if (row.hidden) {
+    return;
   }
 
-  $("p2pText").textContent = text;
-  $("p2pRetry").hidden = !retry;
+  const statusDot = getElement("p2pDot");
+  statusDot.className = "status-dot";
+  let statusText;
+  let showRetry = false;
+
+  switch (p2pState.status) {
+    case "waiting":
+    case "connected":
+      statusDot.classList.add("ok");
+      statusText = "Ready for same-wifi check-ins. Keep this page open.";
+      break;
+    case "connecting":
+      if (navigator.onLine) {
+        statusText = "Starting same-wifi check-in.";
+      } else {
+        statusText = "Same-wifi check-in needs a connection to start.";
+        statusDot.classList.add("warn");
+      }
+      break;
+    case "error":
+      statusDot.classList.add("error");
+      statusText = valueOrFallback(p2pState.message, "Same-wifi check-in stopped.");
+      showRetry = true;
+      break;
+    default:
+      statusText = "Same-wifi check-in is not running.";
+      showRetry = wantP2p();
+  }
+
+  getElement("p2pText").textContent = statusText;
+  getElement("p2pRetry").hidden = !showRetry;
 }
 
-$("p2pRetry").addEventListener("click", restartP2p);
+getElement("p2pRetry").addEventListener("click", restartP2p);
 
 // Input from another device: checked field by field, never trusted.
-function cleanLine(value, max) {
-  if (typeof value !== "string") return "";
-  const clean = value.replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim();
-  return charCount(clean) <= max ? clean : null;
+// Gives back the text on one line, "" when it is not text at all, or null
+// when it is longer than `maximumLength` characters.
+function cleanLine(value, maximumLength) {
+  if (typeof value !== "string") {
+    return "";
+  }
+  const cleaned = value.replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim();
+  if (charCount(cleaned) <= maximumLength) {
+    return cleaned;
+  }
+  return null;
 }
 
 async function onPeerMessage(message, from) {
   // bye, and any type a newer build might send: nothing to do.
-  if (message.type !== "checkin") return;
-
-  if (message.v !== PROTOCOL_VERSION) {
-    host?.send({ type: "refused", reason: "version", message: "This page is out of date. Reload it and try again." }, from);
+  if (message.type !== "checkin") {
     return;
   }
-  host?.send(await takeCheckin(message, "p2p"), from);
+
+  if (message.v !== PROTOCOL_VERSION) {
+    if (host !== null && host !== undefined) {
+      host.send({ type: "refused", reason: "version", message: "This page is out of date. Reload it and try again." }, from);
+    }
+    return;
+  }
+
+  // The answer goes back through the host that was running when the message
+  // came in, and only if one was.
+  const answeringHost = host;
+  if (answeringHost === null || answeringHost === undefined) {
+    return;
+  }
+  const answer = await takeCheckin(message, "p2p");
+  answeringHost.send(answer, from);
 }
 
 // A check-in this page received, by same wifi ("p2p") or through the app's
@@ -538,28 +776,41 @@ async function onPeerMessage(message, from) {
 // reached. Answers { type: "checked-in", at } or { type: "refused", reason,
 // message }, the same-wifi protocol's own answers.
 async function takeCheckin(message, method) {
-  if (!event || event.ended) return { type: "refused", reason: "ended", message: "This event has ended." };
-  if (event.paused) return { type: "refused", reason: "paused", message: "The host has paused check-ins for now." };
+  if (!event || event.ended) {
+    return { type: "refused", reason: "ended", message: "This event has ended." };
+  }
+  if (event.paused) {
+    return { type: "refused", reason: "paused", message: "The host has paused check-ins for now." };
+  }
 
-  const deviceHash =
-    typeof message.deviceHash === "string" && /^[0-9a-f]{64}$/.test(message.deviceHash) ? message.deviceHash : null;
+  let deviceHash = null;
+  if (typeof message.deviceHash === "string" && /^[0-9a-f]{64}$/.test(message.deviceHash)) {
+    deviceHash = message.deviceHash;
+  }
   const name = cleanLine(message.name, LIMITS.name);
-  const note = event.noteLabel ? cleanLine(message.note, LIMITS.note) : "";
+  let note = "";
+  if (event.noteLabel) {
+    note = cleanLine(message.note, LIMITS.note);
+  }
 
   if (!deviceHash || !name || note === null) {
     return { type: "refused", reason: "invalid", message: "That check-in was missing a name." };
   }
 
   // Already waiting in the outbox from this device: the same answer again.
-  const queued = store.getOutbox(code).find((i) => i.kind === "record" && i.payload.deviceHash === deviceHash);
-  if (queued) return { type: "checked-in", at: queued.payload.at };
+  const queued = store.getOutbox(code).find((item) => {
+    return item.kind === "record" && item.payload.deviceHash === deviceHash;
+  });
+  if (queued) {
+    return { type: "checked-in", at: queued.payload.at };
+  }
 
-  const payload = { deviceHash, name, note: note || null, at: new Date().toISOString(), method };
+  const payload = { deviceHash, name, note: valueOrFallback(note, null), at: new Date().toISOString(), method };
   const result = await postJson("host", { code, hostKey, action: "record", ...payload });
 
   if (result.ok) {
     setConnection("ok");
-    upsertAttendee(result.data.attendee);
+    addOrReplaceAttendee(result.data.attendee);
     render();
     return { type: "checked-in", at: result.data.attendee.checkedInAt };
   }
@@ -582,77 +833,110 @@ function wantTap() {
   return Boolean(event && event.allowTap && !event.ended && hostKey && AppBridge.has("tap"));
 }
 
+// The state the app reported in its answer, or "idle" when it reported none.
+function stateFromAnswer(answer) {
+  if (answer === null || answer === undefined) {
+    return "idle";
+  }
+  return valueOrFallback(answer.state, "idle");
+}
+
 // Tells the app whether to answer taps, and with which event's key. Asked
 // again with force when the page comes back, as NFC may have been switched
 // on in the meantime.
 async function syncTap({ force = false } = {}) {
-  const want = wantTap();
-  if (want === tapWanted && !force) return;
-  tapWanted = want;
+  const wanted = wantTap();
+  if (wanted === tapWanted && !force) {
+    return;
+  }
+  tapWanted = wanted;
   try {
-    const answer = await AppBridge.call("Here", "tap", want ? { on: true, code, hostKey } : { on: false });
-    tapState = answer?.state || "idle";
+    let request;
+    if (wanted) {
+      request = { on: true, code, hostKey };
+    } else {
+      request = { on: false };
+    }
+    const answer = await AppBridge.call("Here", "tap", request);
+    tapState = stateFromAnswer(answer);
   } catch {
-    tapState = want ? "error" : "idle";
+    if (wanted) {
+      tapState = "error";
+    } else {
+      tapState = "idle";
+    }
   }
   renderTap();
   updateWakeLock();
 }
 
+// The tap row: a dot, a line of text, and a button when there is something
+// the host can do about it.
 function renderTap() {
-  const row = $("tapRow");
+  const row = getElement("tapRow");
   row.hidden = !event || !event.allowTap || event.ended;
-  if (row.hidden) return;
+  if (row.hidden) {
+    return;
+  }
 
-  const dot = $("tapDot");
-  const action = $("tapAction");
-  dot.className = "status-dot";
-  action.hidden = true;
-  let text;
+  const statusDot = getElement("tapDot");
+  const actionButton = getElement("tapAction");
+  statusDot.className = "status-dot";
+  actionButton.hidden = true;
+  let statusText;
 
   if (!bridgeHeard) {
-    text = "Starting tap check-in.";
+    statusText = "Starting tap check-in.";
   } else if (!AppBridge.has("tap")) {
-    dot.classList.add("warn");
-    text = AppBridge.native
-      ? "Update the uwuHere app to take taps."
-      : "Tapping phones works in the uwuHere app on an Android phone with NFC. Open this event there.";
+    statusDot.classList.add("warn");
+    if (AppBridge.native) {
+      statusText = "Update the uwuHere app to take taps.";
+    } else {
+      statusText = "Tapping phones works in the uwuHere app on an Android phone with NFC. Open this event there.";
+    }
   } else if (tapState === "ready") {
-    dot.classList.add("ok");
-    text = "Ready for taps. People hold their phone against the back of this one.";
+    statusDot.classList.add("ok");
+    statusText = "Ready for taps. People hold their phone against the back of this one.";
   } else if (tapState === "nfc-off") {
-    dot.classList.add("warn");
-    text = "NFC is off on this phone. Turn it on to take taps.";
-    action.textContent = "Turn on";
-    action.dataset.do = "nfc";
-    action.hidden = false;
+    statusDot.classList.add("warn");
+    statusText = "NFC is off on this phone. Turn it on to take taps.";
+    actionButton.textContent = "Turn on";
+    actionButton.dataset.do = "nfc";
+    actionButton.hidden = false;
   } else if (tapState === "unsupported") {
-    dot.classList.add("error");
-    text = "This phone can't take taps: it has no NFC. Open this event in the app on a phone that has it.";
+    statusDot.classList.add("error");
+    statusText = "This phone can't take taps: it has no NFC. Open this event in the app on a phone that has it.";
   } else if (tapState === "error") {
-    dot.classList.add("error");
-    text = "Tapping phones didn't start.";
-    action.textContent = "Retry";
-    action.dataset.do = "retry";
-    action.hidden = false;
+    statusDot.classList.add("error");
+    statusText = "Tapping phones didn't start.";
+    actionButton.textContent = "Retry";
+    actionButton.dataset.do = "retry";
+    actionButton.hidden = false;
   } else {
-    text = "Starting tap check-in.";
+    statusText = "Starting tap check-in.";
   }
-  $("tapText").textContent = text;
+  getElement("tapText").textContent = statusText;
 }
 
-$("tapAction").addEventListener("click", () => {
-  if ($("tapAction").dataset.do === "nfc") AppBridge.call("Here", "openSettings", { what: "nfc" }).catch(() => {});
-  else syncTap({ force: true });
+getElement("tapAction").addEventListener("click", () => {
+  if (getElement("tapAction").dataset.do === "nfc") {
+    AppBridge.call("Here", "openSettings", { what: "nfc" }).catch(ignoreError);
+  } else {
+    syncTap({ force: true });
+  }
 });
 
 // The app says so as a phone reads the link. The check-in itself shows in
 // the list once they press the button on their phone.
-AppBridge.listen("Here", "tapped", () => toast("Phone tapped. They finish on their phone."));
+AppBridge.listen("Here", "tapped", () => {
+  toast("Phone tapped. They finish on their phone.");
+});
 
 // Leaving this page, inside the app, stops the taps.
 window.addEventListener("pagehide", () => {
-  if (tapWanted) AppBridge.call("Here", "tap", { on: false }).catch(() => {});
+  if (tapWanted) {
+    AppBridge.call("Here", "tap", { on: false }).catch(ignoreError);
+  }
 });
 
 /* -------------------------------------------------------------------------
@@ -667,76 +951,100 @@ function wantBluetooth() {
 // shows a permission prompt by itself: it says "needs-permission", and the
 // row's button asks.
 async function syncBluetooth({ force = false, ask = false } = {}) {
-  const want = wantBluetooth();
-  if (want === btWanted && !force && !ask) return;
-  btWanted = want;
+  const wanted = wantBluetooth();
+  if (wanted === bluetoothWanted && !force && !ask) {
+    return;
+  }
+  bluetoothWanted = wanted;
   try {
-    const answer = await AppBridge.call("Here", "bluetooth", want ? { on: true, code, ask } : { on: false });
-    btState = answer?.state || "idle";
-    if (btState === "failed") btState = { failed: answer.message };
+    let request;
+    if (wanted) {
+      request = { on: true, code, ask };
+    } else {
+      request = { on: false };
+    }
+    const answer = await AppBridge.call("Here", "bluetooth", request);
+    bluetoothState = stateFromAnswer(answer);
+    if (bluetoothState === "failed") {
+      bluetoothState = { failed: answer.message };
+    }
   } catch {
-    btState = want ? { failed: "" } : "idle";
+    if (wanted) {
+      bluetoothState = { failed: "" };
+    } else {
+      bluetoothState = "idle";
+    }
   }
   renderBluetooth();
   updateWakeLock();
 }
 
+// The Bluetooth row: a dot, a line of text, and a button when there is
+// something the host can do about it.
 function renderBluetooth() {
-  const row = $("btRow");
+  const row = getElement("btRow");
   row.hidden = !event || !event.allowBluetooth || event.ended;
-  if (row.hidden) return;
+  if (row.hidden) {
+    return;
+  }
 
-  const dot = $("btDot");
-  const action = $("btAction");
-  dot.className = "status-dot";
-  action.hidden = true;
-  const offer = (label, what) => {
-    action.textContent = label;
-    action.dataset.do = what;
-    action.hidden = false;
+  const statusDot = getElement("btDot");
+  const actionButton = getElement("btAction");
+  statusDot.className = "status-dot";
+  actionButton.hidden = true;
+  const offerAction = (label, actionName) => {
+    actionButton.textContent = label;
+    actionButton.dataset.do = actionName;
+    actionButton.hidden = false;
   };
-  let text;
+  let statusText;
 
   if (!bridgeHeard) {
-    text = "Starting Bluetooth check-in.";
+    statusText = "Starting Bluetooth check-in.";
   } else if (!AppBridge.native) {
-    dot.classList.add("warn");
-    text = "Bluetooth check-in works with this event open in the uwuHere app on Android.";
+    statusDot.classList.add("warn");
+    statusText = "Bluetooth check-in works with this event open in the uwuHere app on Android.";
   } else if (!AppBridge.has("mesh")) {
-    dot.classList.add("error");
-    text = AppBridge.has("hotspot")
-      ? "This phone has no Google Play services, which Bluetooth check-in needs."
-      : "Update the uwuHere app to take Bluetooth check-ins.";
-  } else if (btState === "ready") {
-    dot.classList.add("ok");
-    text = "Ready for Bluetooth. Attendees with the uwuHere app check in phone to phone. Keep this page open.";
-  } else if (btState === "needs-permission") {
-    dot.classList.add("warn");
-    text = "Bluetooth check-in needs \"Nearby devices\" on this phone.";
-    offer("Allow", "ask");
-  } else if (btState === "denied") {
-    dot.classList.add("error");
-    text = "\"Nearby devices\" isn't allowed for uwuHere. Allow it in the app's settings.";
-    offer("Settings", "app");
-  } else if (btState === "bt-off") {
-    dot.classList.add("warn");
-    text = "Bluetooth is off on this phone. Turn it on to take Bluetooth check-ins.";
-    offer("Turn on", "bluetooth");
-  } else if (typeof btState === "object") {
-    dot.classList.add("error");
-    text = btState.failed || "Bluetooth check-in didn't start.";
-    offer("Retry", "retry");
+    statusDot.classList.add("error");
+    if (AppBridge.has("hotspot")) {
+      statusText = "This phone has no Google Play services, which Bluetooth check-in needs.";
+    } else {
+      statusText = "Update the uwuHere app to take Bluetooth check-ins.";
+    }
+  } else if (bluetoothState === "ready") {
+    statusDot.classList.add("ok");
+    statusText = "Ready for Bluetooth. Attendees with the uwuHere app check in phone to phone. Keep this page open.";
+  } else if (bluetoothState === "needs-permission") {
+    statusDot.classList.add("warn");
+    statusText = "Bluetooth check-in needs \"Nearby devices\" on this phone.";
+    offerAction("Allow", "ask");
+  } else if (bluetoothState === "denied") {
+    statusDot.classList.add("error");
+    statusText = "\"Nearby devices\" isn't allowed for uwuHere. Allow it in the app's settings.";
+    offerAction("Settings", "app");
+  } else if (bluetoothState === "bt-off") {
+    statusDot.classList.add("warn");
+    statusText = "Bluetooth is off on this phone. Turn it on to take Bluetooth check-ins.";
+    offerAction("Turn on", "bluetooth");
+  } else if (typeof bluetoothState === "object") {
+    statusDot.classList.add("error");
+    statusText = valueOrFallback(bluetoothState.failed, "Bluetooth check-in didn't start.");
+    offerAction("Retry", "retry");
   } else {
-    text = "Starting Bluetooth check-in.";
+    statusText = "Starting Bluetooth check-in.";
   }
-  $("btText").textContent = text;
+  getElement("btText").textContent = statusText;
 }
 
-$("btAction").addEventListener("click", () => {
-  const what = $("btAction").dataset.do;
-  if (what === "ask") syncBluetooth({ ask: true });
-  else if (what === "app" || what === "bluetooth") AppBridge.call("Here", "openSettings", { what }).catch(() => {});
-  else syncBluetooth({ force: true });
+getElement("btAction").addEventListener("click", () => {
+  const requestedAction = getElement("btAction").dataset.do;
+  if (requestedAction === "ask") {
+    syncBluetooth({ ask: true });
+  } else if (requestedAction === "app" || requestedAction === "bluetooth") {
+    AppBridge.call("Here", "openSettings", { what: requestedAction }).catch(ignoreError);
+  } else {
+    syncBluetooth({ force: true });
+  }
 });
 
 // A check-in from an attendee's app, waiting on this answer.
@@ -745,14 +1053,16 @@ AppBridge.listen("Here", "meshCheckin", async (data) => {
   AppBridge.call("Here", "meshAnswer", {
     id: data.id,
     ok: answer.type === "checked-in",
-    at: answer.at || null,
-    message: answer.message || null,
-  }).catch(() => {});
+    at: valueOrFallback(answer.at, null),
+    message: valueOrFallback(answer.message, null),
+  }).catch(ignoreError);
 });
 
 // Leaving this page, inside the app, stops advertising.
 window.addEventListener("pagehide", () => {
-  if (btWanted) AppBridge.call("Here", "bluetooth", { on: false }).catch(() => {});
+  if (bluetoothWanted) {
+    AppBridge.call("Here", "bluetooth", { on: false }).catch(ignoreError);
+  }
 });
 
 /* -------------------------------------------------------------------------
@@ -763,92 +1073,128 @@ window.addEventListener("pagehide", () => {
 // url, message }, from the app (Hotspot.java).
 let hotspot = { status: "off" };
 
+// The hotspot row: a dot, a line of text, and the start / show button.
 function renderHotspot() {
-  const row = $("hotspotRow");
+  const row = getElement("hotspotRow");
   row.hidden = !event || event.ended || !AppBridge.has("hotspot");
-  if (row.hidden) return;
+  if (row.hidden) {
+    return;
+  }
 
-  const dot = $("hotspotDot");
-  const action = $("hotspotAction");
-  dot.className = "status-dot";
-  dot.hidden = hotspot.status === "off";
-  action.disabled = hotspot.status === "starting";
+  const statusDot = getElement("hotspotDot");
+  const actionButton = getElement("hotspotAction");
+  statusDot.className = "status-dot";
+  statusDot.hidden = hotspot.status === "off";
+  actionButton.disabled = hotspot.status === "starting";
 
   if (hotspot.status === "on") {
-    dot.classList.add("ok");
-    $("hotspotText").textContent = `Hotspot on: ${hotspot.ssid}. Keep this page open.`;
-    action.textContent = "Show codes";
+    statusDot.classList.add("ok");
+    getElement("hotspotText").textContent = `Hotspot on: ${hotspot.ssid}. Keep this page open.`;
+    actionButton.textContent = "Show codes";
   } else if (hotspot.status === "starting") {
-    $("hotspotText").textContent = "Starting the hotspot.";
-    action.textContent = "Start";
+    getElement("hotspotText").textContent = "Starting the hotspot.";
+    actionButton.textContent = "Start";
   } else if (hotspot.status === "failed") {
-    dot.classList.add("error");
-    $("hotspotText").textContent = hotspot.message || "The hotspot didn't start.";
-    action.textContent = "Try again";
+    statusDot.classList.add("error");
+    getElement("hotspotText").textContent = valueOrFallback(hotspot.message, "The hotspot didn't start.");
+    actionButton.textContent = "Try again";
   } else {
-    $("hotspotText").textContent = "No internet for attendees? This phone can be their wifi.";
-    action.textContent = "Start";
+    getElement("hotspotText").textContent = "No internet for attendees? This phone can be their wifi.";
+    actionButton.textContent = "Start";
   }
+}
+
+// One value for a wifi QR code, with \ ; , : and " escaped by a backslash.
+// Null or undefined becomes an empty string.
+function escapeWifiValue(value) {
+  let text = "";
+  if (value !== null && value !== undefined) {
+    text = String(value);
+  }
+  return text.replace(/([\\;,:"])/g, "\\$1");
 }
 
 // WIFI:T:WPA;S:name;P:password;; is what phone cameras read as "join this
 // wifi". \ ; , : and " are escaped with a backslash.
 function wifiQrText({ ssid, password, security }) {
-  const esc = (s) => String(s ?? "").replace(/([\\;,:"])/g, "\\$1");
-  return security === "nopass"
-    ? `WIFI:T:nopass;S:${esc(ssid)};;`
-    : `WIFI:T:${security || "WPA"};S:${esc(ssid)};P:${esc(password)};;`;
+  if (security === "nopass") {
+    return `WIFI:T:nopass;S:${escapeWifiValue(ssid)};;`;
+  }
+  return `WIFI:T:${valueOrFallback(security, "WPA")};S:${escapeWifiValue(ssid)};P:${escapeWifiValue(password)};;`;
 }
 
+// Shows the two codes attendees scan: one to join the hotspot's wifi, then
+// one for the check-in page it serves.
 function showHotspot() {
-  if (hotspot.status !== "on") return;
-  const wifi = wifiQrText(hotspot);
-  $("hotspotWifiQr").innerHTML = qrToSvg(wifi, { label: `QR code to join the wifi ${hotspot.ssid}` });
-  $("hotspotWifiText").textContent =
-    hotspot.security === "nopass" ? `Wifi: ${hotspot.ssid}` : `Wifi: ${hotspot.ssid}, password ${hotspot.password}`;
-  $("hotspotPageQr").innerHTML = qrToSvg(hotspot.url, { label: `QR code for ${hotspot.url}` });
-  $("hotspotPageText").textContent = hotspot.url;
+  if (hotspot.status !== "on") {
+    return;
+  }
+  const wifiText = wifiQrText(hotspot);
+  getElement("hotspotWifiQr").innerHTML = qrToSvg(wifiText, { label: `QR code to join the wifi ${hotspot.ssid}` });
+  if (hotspot.security === "nopass") {
+    getElement("hotspotWifiText").textContent = `Wifi: ${hotspot.ssid}`;
+  } else {
+    getElement("hotspotWifiText").textContent = `Wifi: ${hotspot.ssid}, password ${hotspot.password}`;
+  }
+  getElement("hotspotPageQr").innerHTML = qrToSvg(hotspot.url, { label: `QR code for ${hotspot.url}` });
+  getElement("hotspotPageText").textContent = hotspot.url;
   openModal("hotspotModal");
-  if (AppBridge.has("brightness")) AppBridge.call("Here", "brightness", { max: true }).catch(() => {});
+  if (AppBridge.has("brightness")) {
+    AppBridge.call("Here", "brightness", { max: true }).catch(ignoreError);
+  }
 }
 
+// Asks the app to start the hotspot and its check-in page for this event.
 async function startHotspot() {
-  if (!event || event.ended || hotspot.status === "starting") return;
+  if (!event || event.ended || hotspot.status === "starting") {
+    return;
+  }
   hotspot = { status: "starting" };
   renderHotspot();
   try {
     const answer = await AppBridge.call("Here", "hotspot", {
       on: true,
       code,
-      title: event.title || "",
+      title: valueOrFallback(event.title, ""),
       buttonLabel: event.buttonLabel,
       buttonColor: event.buttonColor,
-      noteLabel: event.noteLabel || "",
+      noteLabel: valueOrFallback(event.noteLabel, ""),
     });
-    hotspot = answer?.state === "on" ? { ...answer, status: "on" } : { status: "failed", message: answer?.message };
+    if (answer !== null && answer !== undefined && answer.state === "on") {
+      hotspot = { ...answer, status: "on" };
+    } else {
+      hotspot = { status: "failed", message: messageOf(answer) };
+    }
   } catch (cause) {
-    hotspot = { status: "failed", message: cause?.message };
+    hotspot = { status: "failed", message: messageOf(cause) };
   }
   renderHotspot();
   updateWakeLock();
-  if (hotspot.status === "on") showHotspot();
+  if (hotspot.status === "on") {
+    showHotspot();
+  }
 }
 
 function stopHotspot() {
-  if (hotspot.status === "off") return;
+  if (hotspot.status === "off") {
+    return;
+  }
   hotspot = { status: "off" };
-  AppBridge.call("Here", "hotspot", { on: false }).catch(() => {});
+  AppBridge.call("Here", "hotspot", { on: false }).catch(ignoreError);
   closeIfOpen("hotspotModal");
   renderHotspot();
   updateWakeLock();
 }
 
-$("hotspotAction").addEventListener("click", () => {
-  if (hotspot.status === "on") showHotspot();
-  else startHotspot();
+getElement("hotspotAction").addEventListener("click", () => {
+  if (hotspot.status === "on") {
+    showHotspot();
+  } else {
+    startHotspot();
+  }
 });
 
-$("hotspotStop").addEventListener("click", stopHotspot);
+getElement("hotspotStop").addEventListener("click", stopHotspot);
 
 // A check-in from the hotspot's page, waiting on this answer.
 AppBridge.listen("Here", "hotspotCheckin", async (data) => {
@@ -856,9 +1202,9 @@ AppBridge.listen("Here", "hotspotCheckin", async (data) => {
   AppBridge.call("Here", "hotspotAnswer", {
     id: data.id,
     ok: answer.type === "checked-in",
-    at: answer.at || null,
-    message: answer.message || null,
-  }).catch(() => {});
+    at: valueOrFallback(answer.at, null),
+    message: valueOrFallback(answer.message, null),
+  }).catch(ignoreError);
 });
 
 // Android stopped it, such as for its own wifi.
@@ -872,7 +1218,7 @@ AppBridge.listen("Here", "hotspotStopped", () => {
 // Leaving this page, inside the app, stops the hotspot: its check-ins come here.
 window.addEventListener("pagehide", () => {
   if (hotspot.status === "on" || hotspot.status === "starting") {
-    AppBridge.call("Here", "hotspot", { on: false }).catch(() => {});
+    AppBridge.call("Here", "hotspot", { on: false }).catch(ignoreError);
   }
 });
 
@@ -880,25 +1226,25 @@ window.addEventListener("pagehide", () => {
 // taps to be answered, and for hotspot check-ins to be recorded.
 let appAwake = false;
 
+// Keeps the screen on while any way of checking in is ready and the page is
+// in view, and lets it sleep otherwise.
 async function updateWakeLock() {
-  const want =
-    ((host && (p2p.status === "waiting" || p2p.status === "connected")) ||
-      tapState === "ready" ||
-      btState === "ready" ||
-      hotspot.status === "on") &&
-    document.visibilityState === "visible";
+  const p2pReady = Boolean(host) && (p2pState.status === "waiting" || p2pState.status === "connected");
+  const somethingIsReady =
+    p2pReady || tapState === "ready" || bluetoothState === "ready" || hotspot.status === "on";
+  const wanted = somethingIsReady && document.visibilityState === "visible";
 
   // The app's WebView has no navigator.wakeLock, so the app keeps its own
   // window's screen on instead.
   if (AppBridge.has("keepawake")) {
-    if (Boolean(want) !== appAwake) {
-      appAwake = Boolean(want);
-      AppBridge.call("Here", "keepAwake", { on: appAwake }).catch(() => {});
+    if (wanted !== appAwake) {
+      appAwake = wanted;
+      AppBridge.call("Here", "keepAwake", { on: appAwake }).catch(ignoreError);
     }
     return;
   }
 
-  if (want && !wakeLock && "wakeLock" in navigator) {
+  if (wanted && !wakeLock && "wakeLock" in navigator) {
     try {
       wakeLock = await navigator.wakeLock.request("screen");
       wakeLock.addEventListener("release", () => {
@@ -907,8 +1253,8 @@ async function updateWakeLock() {
     } catch {
       // Refused (battery saver, an unfocused tab): the page still works.
     }
-  } else if (!want && wakeLock) {
-    wakeLock.release().catch(() => {});
+  } else if (!wanted && wakeLock) {
+    wakeLock.release().catch(ignoreError);
     wakeLock = null;
   }
 }
@@ -917,7 +1263,7 @@ async function updateWakeLock() {
  * Actions
  * ---------------------------------------------------------------------- */
 
-$("codeBtn").addEventListener("click", async () => {
+getElement("codeBtn").addEventListener("click", async () => {
   try {
     await navigator.clipboard.writeText(joinLink());
     toast("Link copied");
@@ -929,45 +1275,64 @@ $("codeBtn").addEventListener("click", async () => {
 /* ---- the big QR code ---- */
 
 function showQr() {
-  if (!event || event.ended) return;
+  if (!event || event.ended) {
+    return;
+  }
   const link = joinLink();
-  $("qrModalEvent").textContent = event.title || "";
-  $("qrModalEvent").hidden = !event.title;
-  $("qrModalCode").textContent = code;
-  $("qrModalLink").textContent = link;
-  if ($("qrModalHolder").dataset.link !== link) {
-    $("qrModalHolder").innerHTML = qrToSvg(link, { label: `QR code for ${link}` });
-    $("qrModalHolder").dataset.link = link;
+  getElement("qrModalEvent").textContent = valueOrFallback(event.title, "");
+  getElement("qrModalEvent").hidden = !event.title;
+  getElement("qrModalCode").textContent = code;
+  getElement("qrModalLink").textContent = link;
+  if (getElement("qrModalHolder").dataset.link !== link) {
+    getElement("qrModalHolder").innerHTML = qrToSvg(link, { label: `QR code for ${link}` });
+    getElement("qrModalHolder").dataset.link = link;
   }
   openModal("qrModal");
   // In the app, the screen at full brightness while the code is up, so it
   // scans from the back of a room. The phone's own setting is left alone.
-  if (AppBridge.has("brightness")) AppBridge.call("Here", "brightness", { max: true }).catch(() => {});
+  if (AppBridge.has("brightness")) {
+    AppBridge.call("Here", "brightness", { max: true }).catch(ignoreError);
+  }
 }
 
-$("qrShowBtn").addEventListener("click", showQr);
-$("qrTrayBtn").addEventListener("click", showQr);
+getElement("qrShowBtn").addEventListener("click", showQr);
+getElement("qrTrayBtn").addEventListener("click", showQr);
 
 document.addEventListener("uwu:modalclose", ({ detail }) => {
   if ((detail.id === "qrModal" || detail.id === "hotspotModal") && AppBridge.has("brightness")) {
-    AppBridge.call("Here", "brightness", { max: false }).catch(() => {});
+    AppBridge.call("Here", "brightness", { max: false }).catch(ignoreError);
   }
 });
 
-$("pauseBtn").addEventListener("click", async () => {
-  const button = $("pauseBtn");
+getElement("pauseBtn").addEventListener("click", async () => {
+  const button = getElement("pauseBtn");
   button.disabled = true;
-  const result = await mutate(event.paused ? "resume" : "pause", {}, "Pausing needs a connection.");
+  let action;
+  if (event.paused) {
+    action = "resume";
+  } else {
+    action = "pause";
+  }
+  const result = await mutate(action, {}, "Pausing needs a connection.");
   button.disabled = false;
-  if (!result.ok) toast(result.error);
+  if (!result.ok) {
+    toast(result.error);
+  }
 });
 
-$("attendeeList").addEventListener("click", async (e) => {
-  const button = e.target.closest("[data-remove]");
-  if (!button || !armed(button, "Remove?")) return;
+// The remove button on a row: a check-in still in the outbox is simply
+// dropped; one on the server is removed there.
+getElement("attendeeList").addEventListener("click", async (clickEvent) => {
+  const button = clickEvent.target.closest("[data-remove]");
+  if (!button || !armed(button, "Remove?")) {
+    return;
+  }
 
   if (button.dataset.pending) {
-    store.saveOutbox(code, store.getOutbox(code).filter((i) => i.localId !== button.dataset.remove));
+    const remainingItems = store.getOutbox(code).filter((item) => {
+      return item.localId !== button.dataset.remove;
+    });
+    store.saveOutbox(code, remainingItems);
     render();
     return;
   }
@@ -980,115 +1345,162 @@ $("attendeeList").addEventListener("click", async (e) => {
   }
 });
 
-$("addForm").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const name = $("addName").value.trim();
-  const note = event.noteLabel ? $("addNote").value.trim() : "";
-  if (!name) return $("addName").focus();
+// Adding somebody by hand. With no connection they go into the outbox.
+getElement("addForm").addEventListener("submit", async (submitEvent) => {
+  submitEvent.preventDefault();
+  const name = getElement("addName").value.trim();
+  let note = "";
+  if (event.noteLabel) {
+    note = getElement("addNote").value.trim();
+  }
+  if (!name) {
+    getElement("addName").focus();
+    return;
+  }
 
-  const payload = { name, note: note || null, at: new Date().toISOString() };
+  const payload = { name, note: valueOrFallback(note, null), at: new Date().toISOString() };
   const result = await postJson("host", { code, hostKey, action: "add", ...payload });
 
   if (result.ok) {
     setConnection("ok");
-    upsertAttendee(result.data.attendee);
+    addOrReplaceAttendee(result.data.attendee);
   } else if (connectionFailure(result)) {
     setConnection(connectionFailure(result));
     queue("add", payload);
     toast("Saved on this device. It is sent when the connection is back.");
   } else {
-    return toast(result.error);
+    toast(result.error);
+    return;
   }
 
-  $("addName").value = "";
-  $("addNote").value = "";
+  getElement("addName").value = "";
+  getElement("addNote").value = "";
   render();
-  $("addName").focus();
+  getElement("addName").focus();
 });
 
 /* ---- CSV ---- */
 
-function stamp(iso) {
-  if (!iso) return "";
-  const d = new Date(iso);
-  const pad = (n) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+// A number as two digits, with a leading zero when it needs one.
+function padToTwoDigits(number) {
+  return String(number).padStart(2, "0");
+}
+
+// An ISO time as "YYYY-MM-DD HH:MM" in local time, or "" for no time.
+function spreadsheetTimestamp(isoText) {
+  if (!isoText) {
+    return "";
+  }
+  const date = new Date(isoText);
+  return `${date.getFullYear()}-${padToTwoDigits(date.getMonth() + 1)}-${padToTwoDigits(date.getDate())} ${padToTwoDigits(date.getHours())}:${padToTwoDigits(date.getMinutes())}`;
 }
 
 // A name is typed by an attendee. A cell that starts with = + - or @ is a
 // formula to a spreadsheet, so it is defused with a leading apostrophe.
 function csvCell(value) {
-  let s = String(value ?? "");
-  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
-  return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  let text = "";
+  if (value !== null && value !== undefined) {
+    text = String(value);
+  }
+  if (/^[=+\-@\t\r]/.test(text)) {
+    text = `'${text}`;
+  }
+  if (/[",\r\n]/.test(text)) {
+    return `"${text.replace(/"/g, '""')}"`;
+  }
+  return text;
 }
 
+// Builds the list as a CSV file, oldest first, and saves it: through the app
+// in the Android app, or as a normal download in a browser.
 function downloadCsv() {
-  if (!event) return;
-  const rows = [["Name", event.noteLabel || "Note", "Checked in", "How", "Distance (m)", "Left early"]];
-  for (const a of displayList().reverse()) {
+  if (!event) {
+    return;
+  }
+  const rows = [["Name", valueOrFallback(event.noteLabel, "Note"), "Checked in", "How", "Distance (m)", "Left early"]];
+  for (const attendee of displayList().reverse()) {
     rows.push([
-      a.name,
-      a.note ?? "",
-      stamp(a.checkedInAt),
-      (METHOD[a.method] ?? METHOD.manual).label,
-      a.distance ?? "",
-      stamp(a.leftEarlyAt),
+      attendee.name,
+      valueOrEmptyText(attendee.note),
+      spreadsheetTimestamp(attendee.checkedInAt),
+      methodFor(attendee.method).label,
+      valueOrEmptyText(attendee.distance),
+      spreadsheetTimestamp(attendee.leftEarlyAt),
     ]);
   }
 
   // The byte order mark is what makes Excel read the file as UTF-8.
-  const csv = "﻿" + rows.map((row) => row.map(csvCell).join(",")).join("\r\n");
-  const name = `uwuhere-${code}-${stamp(new Date().toISOString()).slice(0, 10)}.csv`;
+  const csvLines = rows.map((row) => {
+    return row.map(csvCell).join(",");
+  });
+  const csvText = "﻿" + csvLines.join("\r\n");
+  const fileName = `uwuhere-${code}-${spreadsheetTimestamp(new Date().toISOString()).slice(0, 10)}.csv`;
 
   // The app's WebView cannot download a file the page made, so the app saves
   // it: into Downloads, or on older Android wherever the host picks.
   if (AppBridge.has("savefile")) {
-    AppBridge.call("Here", "saveFile", { name, text: csv, mime: "text/csv" })
+    AppBridge.call("Here", "saveFile", { name: fileName, text: csvText, mime: "text/csv" })
       .then((saved) => {
-        if (saved.where === "downloads") toast(`Saved to Downloads as ${name}`);
-        else if (saved.saved) toast("Saved");
+        if (saved.where === "downloads") {
+          toast(`Saved to Downloads as ${fileName}`);
+        } else if (saved.saved) {
+          toast("Saved");
+        }
       })
-      .catch((cause) => toast(cause?.message || "Could not save the list."));
+      .catch((cause) => {
+        toast(valueOrFallback(messageOf(cause), "Could not save the list."));
+      });
     return;
   }
 
-  const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = name;
-  document.body.append(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  const url = URL.createObjectURL(new Blob([csvText], { type: "text/csv;charset=utf-8" }));
+  const downloadLink = document.createElement("a");
+  downloadLink.href = url;
+  downloadLink.download = fileName;
+  document.body.append(downloadLink);
+  downloadLink.click();
+  downloadLink.remove();
+  setTimeout(() => {
+    URL.revokeObjectURL(url);
+  }, 1000);
 }
 
-$("csvBtn").addEventListener("click", downloadCsv);
-$("csvTrayBtn").addEventListener("click", downloadCsv);
-$("endCsvBtn").addEventListener("click", downloadCsv);
+getElement("csvBtn").addEventListener("click", downloadCsv);
+getElement("csvTrayBtn").addEventListener("click", downloadCsv);
+getElement("endCsvBtn").addEventListener("click", downloadCsv);
 
 /* ---- end ---- */
 
-$("endBtn").addEventListener("click", () => {
-  const pending = store.getOutbox(code).length;
-  $("endText").textContent =
+getElement("endBtn").addEventListener("click", () => {
+  const pendingCount = store.getOutbox(code).length;
+  let waitingText = "";
+  if (pendingCount) {
+    let ending;
+    if (pendingCount === 1) {
+      ending = " is";
+    } else {
+      ending = "s are";
+    }
+    waitingText = ` ${pendingCount} check-in${ending} still waiting to be sent from this device.`;
+  }
+  getElement("endText").textContent =
     `Check-ins close for everyone and the attendee page stops working. The list stays downloadable here ` +
     `for ${store.PURGE_AFTER_END_DAYS} days, then it is deleted.` +
-    (pending ? ` ${pending} check-in${pending === 1 ? " is" : "s are"} still waiting to be sent from this device.` : "");
-  $("endError").hidden = true;
+    waitingText;
+  getElement("endError").hidden = true;
   openModal("endModal");
 });
 
-$("endConfirm").addEventListener("click", async () => {
-  const button = $("endConfirm");
+getElement("endConfirm").addEventListener("click", async () => {
+  const button = getElement("endConfirm");
   button.disabled = true;
   await flushOutbox();
   const result = await mutate("end", {}, "Ending the event needs a connection.");
   button.disabled = false;
 
   if (!result.ok) {
-    $("endError").textContent = result.error;
-    $("endError").hidden = false;
+    getElement("endError").textContent = result.error;
+    getElement("endError").hidden = false;
     return;
   }
   closeModal("endModal");
@@ -1100,15 +1512,17 @@ $("endConfirm").addEventListener("click", async () => {
 const settingsMethods = { p2p: true, location: false, tap: false, bluetooth: false };
 let newSpot = null;
 
-function bindCounter(inputId, countId, max) {
-  const input = $(inputId);
-  const update = () => {
-    const n = charCount(input.value);
-    $(countId).textContent = `${n}/${max}`;
-    $(countId).classList.toggle("full", n >= max);
+// Keeps a "12/80" character count next to a text box. Gives back the
+// function that updates it, to call when the box is filled in by code.
+function bindCounter(inputId, countId, maximumLength) {
+  const input = getElement(inputId);
+  const updateCount = () => {
+    const characterTotal = charCount(input.value);
+    getElement(countId).textContent = `${characterTotal}/${maximumLength}`;
+    getElement(countId).classList.toggle("full", characterTotal >= maximumLength);
   };
-  input.addEventListener("input", update);
-  return update;
+  input.addEventListener("input", updateCount);
+  return updateCount;
 }
 
 const counters = [
@@ -1118,140 +1532,179 @@ const counters = [
 ];
 
 function updateSettingsPreview() {
-  $("sPreviewLabel").textContent = $("sButtonLabel").value.trim() || "I'm here";
-  paintHereButton($("sPreview"), $("sButtonColor").value);
+  getElement("sPreviewLabel").textContent = valueOrFallback(getElement("sButtonLabel").value.trim(), "I'm here");
+  paintHereButton(getElement("sPreview"), getElement("sButtonColor").value);
 }
-$("sButtonLabel").addEventListener("input", updateSettingsPreview);
-$("sButtonColor").addEventListener("input", updateSettingsPreview);
+getElement("sButtonLabel").addEventListener("input", updateSettingsPreview);
+getElement("sButtonColor").addEventListener("input", updateSettingsPreview);
 
 function renderSettingsMethods() {
-  document.querySelectorAll("#sMethods [data-method]").forEach((btn) => {
-    btn.setAttribute("aria-pressed", String(settingsMethods[btn.dataset.method]));
+  document.querySelectorAll("#sMethods [data-method]").forEach((methodButton) => {
+    methodButton.setAttribute("aria-pressed", String(settingsMethods[methodButton.dataset.method]));
   });
-  $("sLocationBlock").hidden = !settingsMethods.location;
+  getElement("sLocationBlock").hidden = !settingsMethods.location;
 }
 
-$("sMethods").addEventListener("click", (e) => {
-  const btn = e.target.closest("[data-method]");
-  if (!btn) return;
-  settingsMethods[btn.dataset.method] = !settingsMethods[btn.dataset.method];
+getElement("sMethods").addEventListener("click", (clickEvent) => {
+  const methodButton = clickEvent.target.closest("[data-method]");
+  if (!methodButton) {
+    return;
+  }
+  settingsMethods[methodButton.dataset.method] = !settingsMethods[methodButton.dataset.method];
   renderSettingsMethods();
 });
 
 function renderPasswordState() {
-  $("passwordState").textContent = event.hasPassword
-    ? "A password is set. Anyone with it can manage this event from another device."
-    : "No password. Only this browser can manage this event.";
-  $("clearPassword").hidden = !event.hasPassword;
-  $("passwordError").hidden = true;
+  if (event.hasPassword) {
+    getElement("passwordState").textContent = "A password is set. Anyone with it can manage this event from another device.";
+  } else {
+    getElement("passwordState").textContent = "No password. Only this browser can manage this event.";
+  }
+  getElement("clearPassword").hidden = !event.hasPassword;
+  getElement("passwordError").hidden = true;
 }
 
-$("settingsBtn").addEventListener("click", () => {
-  if (!event) return;
-  $("sTitle").value = event.title;
-  $("sButtonLabel").value = event.buttonLabel;
-  $("sButtonColor").value = event.buttonColor;
-  $("sNoteLabel").value = event.noteLabel ?? "";
-  $("sRadius").value = String(event.radius);
-  if (!$("sRadius").value) $("sRadius").value = "100";
+// Opens the settings dialog filled in with the event as it is now.
+getElement("settingsBtn").addEventListener("click", () => {
+  if (!event) {
+    return;
+  }
+  getElement("sTitle").value = event.title;
+  getElement("sButtonLabel").value = event.buttonLabel;
+  getElement("sButtonColor").value = event.buttonColor;
+  getElement("sNoteLabel").value = valueOrEmptyText(event.noteLabel);
+  getElement("sRadius").value = String(event.radius);
+  if (!getElement("sRadius").value) {
+    getElement("sRadius").value = "100";
+  }
   settingsMethods.p2p = event.allowP2p;
   settingsMethods.location = event.allowLocation;
   settingsMethods.tap = event.allowTap;
   settingsMethods.bluetooth = event.allowBluetooth;
   newSpot = null;
-  $("sUseHere").setAttribute("aria-pressed", "false");
-  $("sUseHereText").textContent = event.hasLocation ? "Move the spot to where I am now" : "Set the spot to where I am now";
-  $("settingsError").hidden = true;
-  $("sPassword").value = "";
-  $("sPwChecks").hidden = true;
-  counters.forEach((update) => update());
+  getElement("sUseHere").setAttribute("aria-pressed", "false");
+  if (event.hasLocation) {
+    getElement("sUseHereText").textContent = "Move the spot to where I am now";
+  } else {
+    getElement("sUseHereText").textContent = "Set the spot to where I am now";
+  }
+  getElement("settingsError").hidden = true;
+  getElement("sPassword").value = "";
+  getElement("sPwChecks").hidden = true;
+  counters.forEach((updateCount) => {
+    updateCount();
+  });
   updateSettingsPreview();
   renderSettingsMethods();
   renderPasswordState();
   openModal("settingsModal");
 });
 
+// Reads where this phone is now as the event's new spot. Gives back whether
+// that worked.
 async function takeSpot() {
-  $("sUseHereText").textContent = "Finding your location";
+  getElement("sUseHereText").textContent = "Finding your location";
   try {
     newSpot = await getPosition();
-    $("sUseHere").setAttribute("aria-pressed", "true");
-    $("sUseHereText").textContent = `Spot set to here, within about ${Math.round(newSpot.accuracy)} m`;
+    getElement("sUseHere").setAttribute("aria-pressed", "true");
+    getElement("sUseHereText").textContent = `Spot set to here, within about ${Math.round(newSpot.accuracy)} m`;
     return true;
   } catch (cause) {
-    $("sUseHereText").textContent = "Set the spot to where I am now";
-    $("settingsError").textContent = cause.message;
-    $("settingsError").hidden = false;
+    getElement("sUseHereText").textContent = "Set the spot to where I am now";
+    getElement("settingsError").textContent = cause.message;
+    getElement("settingsError").hidden = false;
     return false;
   }
 }
 
-$("sUseHere").addEventListener("click", takeSpot);
+getElement("sUseHere").addEventListener("click", takeSpot);
 
-$("settingsForm").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  $("settingsError").hidden = true;
-  const fail = (message) => {
-    $("settingsError").textContent = message;
-    $("settingsError").hidden = false;
-  };
+function showSettingsError(message) {
+  getElement("settingsError").textContent = message;
+  getElement("settingsError").hidden = false;
+}
 
-  const buttonLabel = $("sButtonLabel").value.trim();
-  if (!buttonLabel) return fail("The button needs some text.");
-  if (!settingsMethods.p2p && !settingsMethods.location && !settingsMethods.tap && !settingsMethods.bluetooth) {
-    return fail("Pick at least one way for people to check in.");
+// Saving the settings dialog: checks it, finds a spot if location check-in
+// needs one, and sends the new settings to the server.
+getElement("settingsForm").addEventListener("submit", async (submitEvent) => {
+  submitEvent.preventDefault();
+  getElement("settingsError").hidden = true;
+
+  const buttonLabel = getElement("sButtonLabel").value.trim();
+  if (!buttonLabel) {
+    showSettingsError("The button needs some text.");
+    return;
   }
-  if (settingsMethods.location && !event.hasLocation && !newSpot && !(await takeSpot())) return;
+  if (!settingsMethods.p2p && !settingsMethods.location && !settingsMethods.tap && !settingsMethods.bluetooth) {
+    showSettingsError("Pick at least one way for people to check in.");
+    return;
+  }
+  if (settingsMethods.location && !event.hasLocation && !newSpot && !(await takeSpot())) {
+    return;
+  }
 
   const settings = {
-    title: $("sTitle").value,
+    title: getElement("sTitle").value,
     buttonLabel,
-    buttonColor: $("sButtonColor").value,
-    noteLabel: $("sNoteLabel").value,
+    buttonColor: getElement("sButtonColor").value,
+    noteLabel: getElement("sNoteLabel").value,
     allowP2p: settingsMethods.p2p,
     allowLocation: settingsMethods.location,
     allowTap: settingsMethods.tap,
     allowBluetooth: settingsMethods.bluetooth,
-    radius: Number($("sRadius").value),
+    radius: Number(getElement("sRadius").value),
   };
-  if (newSpot) settings.location = newSpot;
+  if (newSpot) {
+    settings.location = newSpot;
+  }
 
   const result = await mutate("update", { settings }, "Changing settings needs a connection.");
-  if (!result.ok) return fail(result.error);
+  if (!result.ok) {
+    showSettingsError(result.error);
+    return;
+  }
   closeModal("settingsModal");
   toast("Saved");
 });
 
-$("sPassword").addEventListener("input", () => {
-  renderPasswordChecks($("sPwChecks"), $("sPassword").value, { title: event?.title, code });
+getElement("sPassword").addEventListener("input", () => {
+  let eventTitle;
+  if (event === null || event === undefined) {
+    eventTitle = undefined;
+  } else {
+    eventTitle = event.title;
+  }
+  renderPasswordChecks(getElement("sPwChecks"), getElement("sPassword").value, { title: eventTitle, code });
 });
 
-$("passwordForm").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const password = $("sPassword").value;
+getElement("passwordForm").addEventListener("submit", async (submitEvent) => {
+  submitEvent.preventDefault();
+  const password = getElement("sPassword").value;
   if (!checkPassword(password, { title: event.title, code }).ok) {
-    $("passwordError").textContent = "That password is not strong enough yet. See the checklist under it.";
-    $("passwordError").hidden = false;
+    getElement("passwordError").textContent = "That password is not strong enough yet. See the checklist under it.";
+    getElement("passwordError").hidden = false;
     return;
   }
   const result = await mutate("password", { password }, "Setting a password needs a connection.");
   if (!result.ok) {
-    $("passwordError").textContent = result.error;
-    $("passwordError").hidden = false;
+    getElement("passwordError").textContent = result.error;
+    getElement("passwordError").hidden = false;
     return;
   }
-  $("sPassword").value = "";
-  $("sPwChecks").hidden = true;
+  getElement("sPassword").value = "";
+  getElement("sPwChecks").hidden = true;
   renderPasswordState();
   toast("Password set");
 });
 
-$("clearPassword").addEventListener("click", async (e) => {
-  if (!armed(e.currentTarget, "Remove it? Only this browser will manage the event")) return;
+getElement("clearPassword").addEventListener("click", async (clickEvent) => {
+  if (!armed(clickEvent.currentTarget, "Remove it? Only this browser will manage the event")) {
+    return;
+  }
   const result = await mutate("password", { password: "" }, "Removing the password needs a connection.");
   if (!result.ok) {
-    $("passwordError").textContent = result.error;
-    $("passwordError").hidden = false;
+    getElement("passwordError").textContent = result.error;
+    getElement("passwordError").hidden = false;
     return;
   }
   renderPasswordState();
@@ -1260,20 +1713,29 @@ $("clearPassword").addEventListener("click", async (e) => {
 
 /* ---- unlock on another device ---- */
 
-$("unlockForm").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const error = $("unlockError");
-  error.hidden = true;
+// The event's password, typed on a device that did not make the event,
+// gives this browser the host key.
+getElement("unlockForm").addEventListener("submit", async (submitEvent) => {
+  submitEvent.preventDefault();
+  const errorElement = getElement("unlockError");
+  errorElement.hidden = true;
 
-  const result = await postJson("unlock", { code, password: $("unlockPassword").value });
+  const result = await postJson("unlock", { code, password: getElement("unlockPassword").value });
   if (!result.ok) {
-    if (result.reason === "not-found") return eventGone();
-    error.textContent = result.offline ? "Opening an event here needs a connection." : result.error;
-    error.hidden = false;
+    if (result.reason === "not-found") {
+      eventGone();
+      return;
+    }
+    if (result.offline) {
+      errorElement.textContent = "Opening an event here needs a connection.";
+    } else {
+      errorElement.textContent = result.error;
+    }
+    errorElement.hidden = false;
     return;
   }
 
-  $("unlockPassword").value = "";
+  getElement("unlockPassword").value = "";
   hostKey = result.data.hostKey;
   store.saveHosted(code, hostKey, result.data.event);
   applySnapshot(result.data);
@@ -1287,8 +1749,10 @@ $("unlockForm").addEventListener("submit", async (e) => {
 function startPolling() {
   clearInterval(pollTimer);
   pollTimer = setInterval(() => {
-    if (document.visibilityState === "visible" && event && !event.ended) refresh();
-  }, POLL_MS);
+    if (document.visibilityState === "visible" && event && !event.ended) {
+      refresh();
+    }
+  }, POLL_INTERVAL_MILLISECONDS);
 }
 
 document.addEventListener("visibilitychange", () => {
@@ -1298,7 +1762,9 @@ document.addEventListener("visibilitychange", () => {
   }
   refresh();
   // A phone that slept may have lost its peer.
-  if (wantP2p() && (p2p.status === "error" || p2p.status === "idle")) restartP2p();
+  if (wantP2p() && (p2pState.status === "error" || p2pState.status === "idle")) {
+    restartP2p();
+  }
   syncTap({ force: true });
   // Bluetooth may have been switched on, or allowed, meanwhile.
   syncBluetooth({ force: true });
@@ -1307,7 +1773,9 @@ document.addEventListener("visibilitychange", () => {
 
 window.addEventListener("online", () => {
   refresh();
-  if (wantP2p() && p2p.status !== "waiting" && p2p.status !== "connected") restartP2p();
+  if (wantP2p() && p2pState.status !== "waiting" && p2pState.status !== "connected") {
+    restartP2p();
+  }
 });
 
 window.addEventListener("offline", () => {
@@ -1330,24 +1798,33 @@ if (AppBridge.native) {
   });
 }
 
+// Starts the page: shows the copy kept on this device straight away, if
+// there is one, then the server's.
 async function boot() {
   if (!isValidCode(code)) {
-    return showMissing("No event here", "This link has no event code. Make an event from the home page.");
+    showMissing("No event here", "This link has no event code. Make an event from the home page.");
+    return;
   }
 
   hostKey = store.getHostKey(code);
-  if (!hostKey) return showLocked();
+  if (!hostKey) {
+    showLocked();
+    return;
+  }
 
-  const cache = store.getHostCache(code);
-  if (cache?.event) applySnapshot(cache, { fromCache: true });
+  const cachedSnapshot = store.getHostCache(code);
+  if (cachedSnapshot !== null && cachedSnapshot !== undefined && cachedSnapshot.event) {
+    applySnapshot(cachedSnapshot, { fromCache: true });
+  }
 
   await refresh();
 
   if (!event && connection !== "ok") {
-    return showMissing(
+    showMissing(
       "Not available offline",
       "This event has not been opened on this device before. Connect to the internet and reload."
     );
+    return;
   }
   startPolling();
 }

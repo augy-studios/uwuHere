@@ -17,86 +17,137 @@ class AppNav {
   /// Round the whole app, for a picture of it (bug reports, the desktop's screenshot button).
   static final repaintKey = GlobalKey();
 
-  static BuildContext? get context => navigatorKey.currentContext;
+  static BuildContext? get context {
+    return navigatorKey.currentContext;
+  }
 
   /// The last few toasts, newest last: tests and the desktop's title bar read them.
   static final ValueNotifier<String> lastToast = ValueNotifier('');
 
+  /// Shows a short message at the bottom of the app (in the error colour for [error]), replacing
+  /// any message already showing.
   static void toast(String message, {bool error = false}) {
     lastToast.value = message;
-    final m = messengerKey.currentState;
-    final ctx = context;
-    if (m == null || ctx == null) return;
-    final c = UwuColors.of(ctx);
-    m.hideCurrentSnackBar();
-    m.showSnackBar(
+    final messenger = messengerKey.currentState;
+    final currentContext = context;
+    if (messenger == null || currentContext == null) return;
+    final colors = UwuColors.of(currentContext);
+    messenger.hideCurrentSnackBar();
+    // An error is drawn in the error colour; anything else in the theme's own snack bar colours.
+    Color? textColor;
+    Color? backgroundColor;
+    if (error) {
+      textColor = colors.bg;
+      backgroundColor = colors.error;
+    }
+    // On a wide window the message keeps to a fixed width rather than spanning the whole bottom.
+    double? snackBarWidth;
+    if (MediaQuery.sizeOf(currentContext).width > 560) {
+      snackBarWidth = 420;
+    }
+    messenger.showSnackBar(
       SnackBar(
-        content: Text(message, style: TextStyle(color: error ? c.bg : null)),
-        backgroundColor: error ? c.error : null,
+        content: Text(message, style: TextStyle(color: textColor)),
+        backgroundColor: backgroundColor,
         duration: const Duration(seconds: 3),
-        width: MediaQuery.sizeOf(ctx).width > 560 ? 420 : null,
+        width: snackBarWidth,
       ),
     );
   }
 
   /// The site's confirm(): true when agreed to.
   static Future<bool> confirm(String message, {String yes = 'Delete', bool danger = true}) async {
-    final ctx = context;
-    if (ctx == null) return false;
-    final ok = await showDialog<bool>(
-      context: ctx,
+    final currentContext = context;
+    if (currentContext == null) return false;
+    final agreed = await showDialog<bool>(
+      context: currentContext,
       builder: (context) {
-        final c = UwuColors.of(context);
+        final colors = UwuColors.of(context);
+        // A dangerous action's button is drawn in the error colours.
+        ButtonStyle? agreeButtonStyle;
+        if (danger) {
+          agreeButtonStyle = FilledButton.styleFrom(backgroundColor: colors.errorFill, foregroundColor: colors.error);
+        }
         return AlertDialog(
-          content: Text(message, style: TextStyle(color: c.ink, fontSize: 15)),
+          content: Text(message, style: TextStyle(color: colors.ink, fontSize: 15)),
           actions: [
-            OutlinedButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+            OutlinedButton(
+              onPressed: () {
+                Navigator.pop(context, false);
+              },
+              child: const Text('Cancel'),
+            ),
             FilledButton(
-              style: danger ? FilledButton.styleFrom(backgroundColor: c.errorFill, foregroundColor: c.error) : null,
-              onPressed: () => Navigator.pop(context, true),
+              style: agreeButtonStyle,
+              onPressed: () {
+                Navigator.pop(context, true);
+              },
               child: Text(yes),
             ),
           ],
         );
       },
     );
-    return ok == true;
+    return agreed == true;
   }
 
   /// The site's prompt(): the words typed, or null when cancelled or left empty.
   static Future<String?> prompt(String label, {String initial = '', String ok = 'OK'}) async {
-    final ctx = context;
-    if (ctx == null) return null;
+    final currentContext = context;
+    if (currentContext == null) return null;
     final controller = TextEditingController(text: initial);
     final value = await showDialog<String>(
-      context: ctx,
-      builder: (context) => AlertDialog(
-        title: Text(label, style: const TextStyle(fontSize: 16)),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          textCapitalization: TextCapitalization.sentences,
-          onSubmitted: (v) => Navigator.pop(context, v),
-        ),
-        actions: [
-          OutlinedButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(context, controller.text), child: Text(ok)),
-        ],
-      ),
+      context: currentContext,
+      builder: (context) {
+        return AlertDialog(
+          title: Text(label, style: const TextStyle(fontSize: 16)),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            textCapitalization: TextCapitalization.sentences,
+            onSubmitted: (typedText) {
+              Navigator.pop(context, typedText);
+            },
+          ),
+          actions: [
+            OutlinedButton(
+              onPressed: () {
+                Navigator.pop(context);
+              },
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () {
+                Navigator.pop(context, controller.text);
+              },
+              child: Text(ok),
+            ),
+          ],
+        );
+      },
     );
-    final v = value?.trim();
-    return v == null || v.isEmpty ? null : v;
+    if (value == null) return null;
+    final trimmedValue = value.trim();
+    if (trimmedValue.isEmpty) return null;
+    return trimmedValue;
   }
 
   /// Closes whatever windows are open over the app (signing out, a link arriving).
   static void closeSheets() {
-    navigatorKey.currentState?.popUntil((r) => r.isFirst);
+    final navigator = navigatorKey.currentState;
+    if (navigator != null) {
+      navigator.popUntil((route) {
+        return route.isFirst;
+      });
+    }
     AppSheet.closeAll();
   }
 }
 
 /// Puts words on the clipboard.
-Future<void> copyText(String text) => Clipboard.setData(ClipboardData(text: text));
+Future<void> copyText(String text) {
+  return Clipboard.setData(ClipboardData(text: text));
+}
 
 /// Opens a link in the person's own browser (or mail app): never inside the app. True if it went.
 Future<bool> openOutside(Uri uri) async {

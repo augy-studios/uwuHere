@@ -23,7 +23,7 @@
    An ended event is read only: `get` still works, so the list can be
    downloaded until the purge, and everything else answers 410. */
 
-import { endpoint, ok, readBody, dbError, HttpError } from "./_lib/http.js";
+import { endpoint, ok, readBody, databaseError, HttpError } from "./_lib/http.js";
 import { rest } from "./_lib/supabase.js";
 import { isHostKey, hashPassword } from "./_lib/auth.js";
 import { checkHostPassword } from "./_lib/password.js";
@@ -63,8 +63,8 @@ export default endpoint(["POST"], async (req, res) => {
     case "add": {
       const result = await insertAttendee(event.id, {
         device_hash: null,
-        name: v.text(body.name, "The name", { min: 1, max: v.LIMITS.name }),
-        note: v.optionalText(body.note, "The note", { max: v.LIMITS.note }),
+        name: v.text(body.name, "The name", { minimum: 1, maximum: v.LIMITS.name }),
+        note: v.optionalText(body.note, "The note", { maximum: v.LIMITS.note }),
         method: "manual",
         checked_in_at: v.pastTime(body.at, event.created_at),
       });
@@ -77,7 +77,7 @@ export default endpoint(["POST"], async (req, res) => {
         query: { id: `eq.${v.uuid(body.attendeeId, "attendee")}`, event_id: `eq.${event.id}` },
         prefer: "return=minimal",
       });
-      if (!result.ok) throw dbError(result);
+      if (!result.ok) throw databaseError(result);
       return snapshot(res, event);
     }
 
@@ -116,7 +116,7 @@ async function patchEvent(event, columns) {
     prefer: "return=representation",
     body: columns,
   });
-  if (!result.ok) throw dbError(result);
+  if (!result.ok) throw databaseError(result);
   return result.data?.[0] ?? { ...event, ...columns };
 }
 

@@ -9,11 +9,17 @@ const imageTypes = XTypeGroup(
   uniformTypeIdentifiers: ['public.image'],
 );
 
+/// Opens the system's picker for pictures: several at once, or just one. An empty list when the
+/// person picked nothing or the picker failed.
 Future<List<XFile>> pickImages({bool multiple = true}) async {
   try {
     if (multiple) return await openFiles(acceptedTypeGroups: const [imageTypes]);
-    final f = await openFile(acceptedTypeGroups: const [imageTypes]);
-    return f == null ? const [] : [f];
+    final pickedFile = await openFile(acceptedTypeGroups: const [imageTypes]);
+    if (pickedFile == null) {
+      return const [];
+    } else {
+      return [pickedFile];
+    }
   } catch (_) {
     return const [];
   }

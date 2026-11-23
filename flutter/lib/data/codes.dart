@@ -3,9 +3,19 @@
 const codeAlphabet = 'BCDFGHJKLMNPQRSTVWXYZ23456789';
 const codeLength = 6;
 
+/// What someone typed, as a code: upper case, letters and digits only, at most [codeLength] long.
 String normaliseCode(String? input) {
-  final s = (input ?? '').toUpperCase().replaceAll(RegExp(r'[^A-Z0-9]'), '');
-  return s.length > codeLength ? s.substring(0, codeLength) : s;
+  String typedText;
+  if (input == null) {
+    typedText = '';
+  } else {
+    typedText = input;
+  }
+  final cleanedCode = typedText.toUpperCase().replaceAll(RegExp(r'[^A-Z0-9]'), '');
+  if (cleanedCode.length > codeLength) {
+    return cleanedCode.substring(0, codeLength);
+  }
+  return cleanedCode;
 }
 
 bool isValidCode(String? input) {

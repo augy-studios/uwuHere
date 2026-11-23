@@ -8,8 +8,26 @@
    callers before they get here, so nothing user-typed is spliced into a
    PostgREST filter expression. */
 
-const URL_BASE = (process.env.SUPABASE_URL || "").replace(/\/$/, "");
-const SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY || "";
+// The project's address without a trailing slash, or "" when it is not set.
+function supabaseUrlBase() {
+  let url = process.env.SUPABASE_URL;
+  if (!url) {
+    url = "";
+  }
+  return url.replace(/\/$/, "");
+}
+
+// The service role key, or "" when it is not set.
+function supabaseServiceKey() {
+  const key = process.env.SUPABASE_SERVICE_KEY;
+  if (key) {
+    return key;
+  }
+  return "";
+}
+
+const URL_BASE = supabaseUrlBase();
+const SERVICE_KEY = supabaseServiceKey();
 
 export function hasSupabase() {
   return Boolean(URL_BASE && SERVICE_KEY);
@@ -27,33 +45,66 @@ export function hasSupabase() {
  */
 export async function rest(path, { method = "GET", query = {}, body, prefer } = {}) {
   const url = new URL(`${URL_BASE}/rest/v1/${path}`);
-  for (const [key, value] of Object.entries(query)) url.searchParams.set(key, value);
+  for (const [key, value] of Object.entries(query)) {
+    url.searchParams.set(key, value);
+  }
 
   const headers = {
     apikey: SERVICE_KEY,
     Authorization: `Bearer ${SERVICE_KEY}`,
     "Content-Type": "application/json",
   };
-  if (prefer) headers.Prefer = prefer;
+  if (prefer) {
+    headers.Prefer = prefer;
+  }
 
   try {
+    let requestBody = undefined;
+    if (body !== undefined) {
+      requestBody = JSON.stringify(body);
+    }
+
     const response = await fetch(url, {
       method,
       headers,
-      body: body === undefined ? undefined : JSON.stringify(body),
+      body: requestBody,
     });
 
     const text = await response.text();
     let data = null;
     try {
-      data = text ? JSON.parse(text) : null;
+      if (text) {
+        data = JSON.parse(text);
+      } else {
+        data = null;
+      }
     } catch {
       data = null;
     }
 
     return { ok: response.ok, status: response.status, data };
   } catch (cause) {
-    console.error("[uwuhere] supabase unreachable:", cause?.message ?? cause);
+    let reason = cause;
+    if (cause !== null && cause !== undefined && cause.message !== null && cause.message !== undefined) {
+      reason = cause.message;
+    }
+    console.error("[uwuhere] supabase unreachable:", reason);
     return { ok: false, status: 0, data: null };
   }
+}
+
+/**
+ * The first row a rest() call answered with, or null when there is none:
+ * no data at all, an empty list, or a first row that is itself null.
+ */
+export function firstRow(result) {
+  const rows = result.data;
+  if (rows === null || rows === undefined) {
+    return null;
+  }
+  const row = rows[0];
+  if (row === null || row === undefined) {
+    return null;
+  }
+  return row;
 }

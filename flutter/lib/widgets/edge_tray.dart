@@ -20,6 +20,7 @@ import '../data/store.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
 
+/// One button in the tray: its icon, its name, and what it does.
 class TrayItem {
   const TrayItem({required this.icon, required this.label, required this.onTap, this.tourId});
   final String icon;
@@ -53,23 +54,42 @@ class EdgeTray extends StatefulWidget {
   static const _gap = 8.0;
 
   /// The spec's --glass-btn: 44 px, 40 on a phone up to 480 px wide.
-  static double buttonSize(BuildContext context) => MediaQuery.sizeOf(context).width <= 480 ? 40 : 44;
+  static double buttonSize(BuildContext context) {
+    if (MediaQuery.sizeOf(context).width <= 480) {
+      return 40;
+    }
+    return 44;
+  }
 
   /// The spec's --edge: 16 px from the right edge (10 on a phone), clear of a landscape notch.
   static double edge(BuildContext context) {
-    final inset = MediaQuery.sizeOf(context).width <= 480 ? 10.0 : 16.0;
+    double inset;
+    if (MediaQuery.sizeOf(context).width <= 480) {
+      inset = 10.0;
+    } else {
+      inset = 16.0;
+    }
     return math.max(inset, MediaQuery.paddingOf(context).right + inset);
   }
 
   /// Up to here the page's column would meet the tray (app.css's breakpoint).
-  static bool _narrow(BuildContext context) => MediaQuery.sizeOf(context).width <= 760;
+  static bool _isNarrow(BuildContext context) {
+    return MediaQuery.sizeOf(context).width <= 760;
+  }
 
   /// The page's right padding while the tray's out on a narrow screen: the buttons, their edge
   /// and a 12 px gap. None when it's tucked away or the screen is wide.
-  static double roomFor(BuildContext context) => open.value && _narrow(context) ? buttonSize(context) + edge(context) + 12 : 0;
+  static double roomFor(BuildContext context) {
+    if (open.value && _isNarrow(context)) {
+      return buttonSize(context) + edge(context) + 12;
+    }
+    return 0;
+  }
 
   @override
-  State<EdgeTray> createState() => _EdgeTrayState();
+  State<EdgeTray> createState() {
+    return _EdgeTrayState();
+  }
 }
 
 class _EdgeTrayState extends State<EdgeTray> {
@@ -79,34 +99,65 @@ class _EdgeTrayState extends State<EdgeTray> {
     EdgeTray.open.value = Store.I.get(EdgeTray.storeKey) != '0';
   }
 
-  bool get _open => EdgeTray.open.value;
+  bool get _open {
+    return EdgeTray.open.value;
+  }
 
-  void _toggle() => setState(() {
-    EdgeTray.open.value = !_open;
-    Store.I.put(EdgeTray.storeKey, _open ? '1' : '0');
-  });
+  /// Opens or tucks away the tray, and remembers which ('1' out, '0' tucked away).
+  void _toggle() {
+    setState(() {
+      EdgeTray.open.value = !_open;
+      String storedValue;
+      if (_open) {
+        storedValue = '1';
+      } else {
+        storedValue = '0';
+      }
+      Store.I.put(EdgeTray.storeKey, storedValue);
+    });
+  }
 
+  /// The tab and the column of buttons side by side, slid right by the open/closed animation so
+  /// only the tab is left showing when it's tucked away.
   @override
   Widget build(BuildContext context) {
-    final c = UwuColors.of(context);
+    final colors = UwuColors.of(context);
     final open = _open;
-    final time = MediaQuery.of(context).disableAnimations ? Duration.zero : EdgeTray.time;
+
+    Duration animationTime;
+    if (MediaQuery.of(context).disableAnimations) {
+      animationTime = Duration.zero;
+    } else {
+      animationTime = EdgeTray.time;
+    }
+
     final size = EdgeTray.buttonSize(context);
     final edge = EdgeTray.edge(context);
     // Far enough that the tab's right side lands on the edge, and 1 px more so its right border
     // goes past it: at the edge it's flat on that side, with no border there.
     final shift = size + EdgeTray._gap + edge + 1;
 
-    Widget button(TrayItem t) {
-      final b = _Glass(width: size, height: size, label: t.label, lift: true, onTap: t.onTap, child: AppIcon(t.icon, size: size * 0.45, color: c.ink));
-      final wrap = widget.wrapTarget;
-      return t.tourId != null && wrap != null ? wrap(t.tourId!, b) : b;
+    // One tray button, wrapped as a tour stop when it is one.
+    Widget buildButton(TrayItem item) {
+      final glassButton = _Glass(
+        width: size,
+        height: size,
+        label: item.label,
+        lift: true,
+        onTap: item.onTap,
+        child: AppIcon(item.icon, size: size * 0.45, color: colors.ink),
+      );
+      final wrapTarget = widget.wrapTarget;
+      if (item.tourId != null && wrapTarget != null) {
+        return wrapTarget(item.tourId!, glassButton);
+      }
+      return glassButton;
     }
 
     final items = <Widget>[
-      for (final t in widget.page) button(t),
-      Container(width: 24, height: 1, margin: const EdgeInsets.symmetric(vertical: 2), color: c.ink.withValues(alpha: 0.25)),
-      for (final t in widget.app) button(t),
+      for (final item in widget.page) buildButton(item),
+      Container(width: 24, height: 1, margin: const EdgeInsets.symmetric(vertical: 2), color: colors.ink.withValues(alpha: 0.25)),
+      for (final item in widget.app) buildButton(item),
     ];
 
     // Tucked away, the buttons are inert: no focus, no taps, nothing for a screen reader.
@@ -121,9 +172,9 @@ class _EdgeTrayState extends State<EdgeTray> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                for (var i = 0; i < items.length; i++) ...[
-                  if (i > 0) const SizedBox(height: EdgeTray._gap),
-                  _Unroll(open: open, delay: Duration(milliseconds: 18 * i), time: time, child: items[i]),
+                for (var index = 0; index < items.length; index = index + 1) ...[
+                  if (index > 0) const SizedBox(height: EdgeTray._gap),
+                  _Unroll(open: open, delay: Duration(milliseconds: 18 * index), time: animationTime, child: items[index]),
                 ],
               ],
             ),
@@ -132,32 +183,44 @@ class _EdgeTrayState extends State<EdgeTray> {
       ),
     );
 
-    // k runs 0 (out) to 1 (tucked away): the slide, the tab's flat side and its chevron.
+    double tuckedTarget;
+    String tabLabel;
+    if (open) {
+      tuckedTarget = 0;
+      tabLabel = 'Hide menu';
+    } else {
+      tuckedTarget = 1;
+      tabLabel = 'Show menu';
+    }
+
+    // tuckedAmount runs 0 (out) to 1 (tucked away): the slide, the tab's flat side and its chevron.
     return TweenAnimationBuilder<double>(
-      tween: Tween(end: open ? 0 : 1),
-      duration: time,
+      tween: Tween(end: tuckedTarget),
+      duration: animationTime,
       curve: EdgeTray.ease,
       child: column,
-      builder: (context, k, column) => Transform.translate(
-        offset: Offset(shift * k, 0),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _Glass(
-              width: EdgeTray._tabWidth,
-              height: size,
-              radius: BorderRadius.horizontal(left: const Radius.circular(12), right: Radius.circular(12 * (1 - k))),
-              label: open ? 'Hide menu' : 'Show menu',
-              expanded: open,
-              onTap: _toggle,
-              child: Transform.rotate(angle: math.pi * k, child: AppIcon('chevronRight', size: 16, color: c.ink)),
-            ),
-            const SizedBox(width: EdgeTray._gap),
-            column!,
-          ],
-        ),
-      ),
+      builder: (context, tuckedAmount, column) {
+        return Transform.translate(
+          offset: Offset(shift * tuckedAmount, 0),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _Glass(
+                width: EdgeTray._tabWidth,
+                height: size,
+                radius: BorderRadius.horizontal(left: const Radius.circular(12), right: Radius.circular(12 * (1 - tuckedAmount))),
+                label: tabLabel,
+                expanded: open,
+                onTap: _toggle,
+                child: Transform.rotate(angle: math.pi * tuckedAmount, child: AppIcon('chevronRight', size: 16, color: colors.ink)),
+              ),
+              const SizedBox(width: EdgeTray._gap),
+              column!,
+            ],
+          ),
+        );
+      },
     );
   }
 }
@@ -186,19 +249,64 @@ class _Glass extends StatefulWidget {
   final bool? expanded;
 
   @override
-  State<_Glass> createState() => _GlassState();
+  State<_Glass> createState() {
+    return _GlassState();
+  }
 }
 
 class _GlassState extends State<_Glass> {
-  bool _hover = false;
-  bool _focus = false;
+  bool _hovered = false;
+  bool _focused = false;
 
+  /// The piece's box: lifted on hover, outlined on keyboard focus, and in the glass look a
+  /// see-through fill with a border and a soft shadow.
   @override
   Widget build(BuildContext context) {
-    final c = UwuColors.of(context);
+    final colors = UwuColors.of(context);
     final dark = Theme.of(context).brightness == Brightness.dark;
-    final hover = _hover && widget.lift;
-    final keyboard = FocusManager.instance.highlightMode == FocusHighlightMode.traditional;
+    final hovered = _hovered && widget.lift;
+    final usingKeyboard = FocusManager.instance.highlightMode == FocusHighlightMode.traditional;
+
+    double liftOffset;
+    if (hovered) {
+      liftOffset = -1;
+    } else {
+      liftOffset = 0;
+    }
+
+    BoxDecoration? focusOutline;
+    if (_focused && usingKeyboard) {
+      focusOutline = BoxDecoration(
+        borderRadius: widget.radius,
+        border: Border.all(color: colors.ink, width: 2, strokeAlign: 4),
+      );
+    } else {
+      focusOutline = null;
+    }
+
+    Color fillColour;
+    if (hovered) {
+      fillColour = colors.surfaceStrong;
+    } else if (colors.glass) {
+      fillColour = colors.surface;
+    } else {
+      fillColour = colors.surfaceStrong;
+    }
+
+    Border? glassBorder;
+    List<BoxShadow>? glassShadows;
+    if (colors.glass) {
+      glassBorder = Border.all(color: colors.border);
+      if (dark) {
+        glassShadows = [const BoxShadow(color: Color(0x80000000), blurRadius: 34, offset: Offset(0, 10))];
+      } else {
+        glassShadows = [const BoxShadow(color: Color(0x1A14281E), blurRadius: 30, offset: Offset(0, 10))];
+      }
+    } else {
+      glassBorder = null;
+      glassShadows = null;
+    }
+
     return Tooltip(
       message: widget.label,
       excludeFromSemantics: true,
@@ -209,26 +317,27 @@ class _GlassState extends State<_Glass> {
         excludeSemantics: true,
         child: MouseRegion(
           cursor: SystemMouseCursors.click,
-          onEnter: (_) => setState(() => _hover = true),
-          onExit: (_) => setState(() => _hover = false),
+          onEnter: (_) {
+            setState(() {
+              _hovered = true;
+            });
+          },
+          onExit: (_) {
+            setState(() {
+              _hovered = false;
+            });
+          },
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 150),
-            transform: Matrix4.translationValues(0, hover ? -1 : 0, 0),
+            transform: Matrix4.translationValues(0, liftOffset, 0),
             width: widget.width,
             height: widget.height,
-            foregroundDecoration: _focus && keyboard
-                ? BoxDecoration(
-                    borderRadius: widget.radius,
-                    border: Border.all(color: c.ink, width: 2, strokeAlign: 4),
-                  )
-                : null,
+            foregroundDecoration: focusOutline,
             decoration: BoxDecoration(
-              color: hover ? c.surfaceStrong : (c.glass ? c.surface : c.surfaceStrong),
+              color: fillColour,
               borderRadius: widget.radius,
-              border: c.glass ? Border.all(color: c.border) : null,
-              boxShadow: c.glass
-                  ? [dark ? const BoxShadow(color: Color(0x80000000), blurRadius: 34, offset: Offset(0, 10)) : const BoxShadow(color: Color(0x1A14281E), blurRadius: 30, offset: Offset(0, 10))]
-                  : null,
+              border: glassBorder,
+              boxShadow: glassShadows,
             ),
             child: Material(
               type: MaterialType.transparency,
@@ -236,7 +345,11 @@ class _GlassState extends State<_Glass> {
                 mouseCursor: SystemMouseCursors.click,
                 borderRadius: widget.radius,
                 onTap: widget.onTap,
-                onFocusChange: (f) => setState(() => _focus = f),
+                onFocusChange: (hasFocus) {
+                  setState(() {
+                    _focused = hasFocus;
+                  });
+                },
                 child: Center(child: widget.child),
               ),
             ),
@@ -257,51 +370,83 @@ class _Unroll extends StatefulWidget {
   final Widget child;
 
   @override
-  State<_Unroll> createState() => _UnrollState();
+  State<_Unroll> createState() {
+    return _UnrollState();
+  }
 }
 
 class _UnrollState extends State<_Unroll> with SingleTickerProviderStateMixin {
-  late final _c = AnimationController(vsync: this, duration: widget.time, value: widget.open ? 1 : 0);
-  Timer? _wait;
+  late final AnimationController _controller = _createController();
+  Timer? _delayTimer;
+
+  /// The animation, starting at its end (1) if the tray is out and at its start (0) if not.
+  AnimationController _createController() {
+    double startValue;
+    if (widget.open) {
+      startValue = 1;
+    } else {
+      startValue = 0;
+    }
+    return AnimationController(vsync: this, duration: widget.time, value: startValue);
+  }
 
   @override
-  void didUpdateWidget(_Unroll old) {
-    super.didUpdateWidget(old);
-    _c.duration = widget.time;
-    if (widget.open == old.open) return;
-    _wait?.cancel();
+  void didUpdateWidget(_Unroll oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _controller.duration = widget.time;
+    if (widget.open == oldWidget.open) {
+      return;
+    }
+    final delayTimer = _delayTimer;
+    if (delayTimer != null) {
+      delayTimer.cancel();
+    }
     if (!widget.open) {
-      _c.reverse();
+      _controller.reverse();
     } else if (widget.time == Duration.zero) {
-      _c.value = 1;
+      _controller.value = 1;
     } else {
-      _wait = Timer(widget.delay, _c.forward);
+      _delayTimer = Timer(widget.delay, _controller.forward);
     }
   }
 
   @override
   void dispose() {
-    _wait?.cancel();
-    _c.dispose();
+    final delayTimer = _delayTimer;
+    if (delayTimer != null) {
+      delayTimer.cancel();
+    }
+    _controller.dispose();
     super.dispose();
   }
 
+  /// Fades, slides and scales the item by the animation's progress, with the curves running
+  /// forwards while opening and mirrored while closing.
   @override
-  Widget build(BuildContext context) => AnimatedBuilder(
-    animation: _c,
-    child: widget.child,
-    builder: (context, child) {
-      final v = _c.value;
-      final opening = _c.status == AnimationStatus.forward || _c.status == AnimationStatus.completed;
-      final move = opening ? EdgeTray.ease.transform(v) : 1 - EdgeTray.ease.transform(1 - v);
-      final fade = opening ? Curves.ease.transform(math.min(1, v / 0.8)) : 1 - Curves.ease.transform(math.min(1, (1 - v) / 0.8));
-      return Opacity(
-        opacity: fade,
-        child: Transform.translate(
-          offset: Offset(12 * (1 - move), 0),
-          child: Transform.scale(scale: 0.85 + 0.15 * move, child: child),
-        ),
-      );
-    },
-  );
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _controller,
+      child: widget.child,
+      builder: (context, child) {
+        final progress = _controller.value;
+        final opening = _controller.status == AnimationStatus.forward || _controller.status == AnimationStatus.completed;
+        double move;
+        double fade;
+        if (opening) {
+          move = EdgeTray.ease.transform(progress);
+          fade = Curves.ease.transform(math.min(1, progress / 0.8));
+        } else {
+          move = 1 - EdgeTray.ease.transform(1 - progress);
+          fade = 1 - Curves.ease.transform(math.min(1, (1 - progress) / 0.8));
+        }
+        return Opacity(
+          opacity: fade,
+          child: Transform.translate(
+            offset: Offset(12 * (1 - move), 0),
+            child: Transform.scale(scale: 0.85 + 0.15 * move, child: child),
+          ),
+        );
+      },
+    );
+  }
 }

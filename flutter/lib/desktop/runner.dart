@@ -14,54 +14,72 @@ class Runner {
 
   static const _channel = MethodChannel('org.uwuapps.here/desktop');
 
-  /// Set by desktop_main.dart.
-  static void Function(String id)? onThumb;
+  /// Set by desktop_main.dart: a taskbar thumbnail button was clicked ('toggle', 'previous' or
+  /// 'next').
+  static void Function(String id)? onThumbnailButton;
+
+  /// Set by desktop_main.dart: an event was picked from the Dock menu.
   static void Function(String code)? onDock;
 
   /// A link opened from elsewhere (macOS), or a click on the Dock icon (`null`).
   static void Function(String? link)? onOpen;
 
+  /// Answers the runner's events by passing each to its handler above, where one is set.
   static void listen() {
     _channel.setMethodCallHandler((call) async {
-      final args = call.arguments;
+      final callArguments = call.arguments;
       switch (call.method) {
         case 'thumb':
-          onThumb?.call('$args');
+          final thumbnailHandler = onThumbnailButton;
+          if (thumbnailHandler != null) thumbnailHandler('$callArguments');
         case 'dock':
-          onDock?.call('$args');
+          final dockHandler = onDock;
+          if (dockHandler != null) dockHandler('$callArguments');
         case 'open':
-          onOpen?.call(args is String ? args : null);
+          final openHandler = onOpen;
+          if (openHandler != null) {
+            String? link;
+            if (callArguments is String) link = callArguments;
+            openHandler(link);
+          }
         case 'activate':
-          onOpen?.call(null);
+          final openHandler = onOpen;
+          if (openHandler != null) openHandler(null);
       }
       return null;
     });
   }
 
-  static Future<void> _call(String method, [Object? args]) async {
+  static Future<void> _call(String method, [Object? arguments]) async {
     try {
-      await _channel.invokeMethod(method, args);
+      await _channel.invokeMethod(method, arguments);
     } catch (_) {
       // Not on this system.
     }
   }
 
   /// Your events, [{ code, name }], for the Jump List, thumbnail buttons and Dock menu.
-  static Future<void> setFavourites(List<Map<String, Object?>> favs) => _call('setFavourites', {
-    'items': [
-      for (final f in favs) {'id': '${f['code']}', 'name': '${f['name']}', 'link': 'uwu://here/host?id=${f['code']}'},
-    ],
-  });
+  static Future<void> setFavourites(List<Map<String, Object?>> favourites) {
+    return _call('setFavourites', {
+      'items': [
+        for (final favourite in favourites) {'id': '${favourite['code']}', 'name': '${favourite['name']}', 'link': 'uwu://here/host?id=${favourite['code']}'},
+      ],
+    });
+  }
 
   /// The Dock's badge (macOS): a few characters, or '' for none.
-  static Future<void> setBadge(String text) => _call('setBadge', text);
+  static Future<void> setBadge(String text) {
+    return _call('setBadge', text);
+  }
 
   /// The system's own material behind the window (lib/desktop/backdrop.dart): 'mica' or 'acrylic'
   /// (Windows 11), 'vibrancy' (macOS), 'blur' (Linux, where the compositor blurs), or 'none'.
   /// Whether the system shows it now: false where it can't, and on a runner without it.
   static Future<bool> setBackdrop(String kind, {required bool dark}) async {
     try {
-      return await _channel.invokeMethod<bool>('setBackdrop', {'kind': kind, 'dark': dark}) ?? false;
+      final shown = await _channel.invokeMethod<bool>('setBackdrop', {'kind': kind, 'dark': dark});
+      if (shown == null) return false;
+      return shown;
     } catch (_) {
       return false;
     }

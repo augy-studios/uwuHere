@@ -6,7 +6,7 @@
    The code is drawn here rather than in the browser so that the unique index
    on uwuhere_events.code decides collisions, not two clients guessing. */
 
-import { endpoint, ok, readBody, dbError, HttpError } from "./_lib/http.js";
+import { endpoint, ok, readBody, databaseError, HttpError } from "./_lib/http.js";
 import { rest } from "./_lib/supabase.js";
 import { hostKeyFor, hashPassword, requireHostSecret } from "./_lib/auth.js";
 import { checkHostPassword } from "./_lib/password.js";
@@ -36,7 +36,7 @@ export default endpoint(["POST"], async (req, res) => {
 
     // 409 is the unique index on code: draw another.
     if (result.status === 409) continue;
-    if (!result.ok) throw dbError(result);
+    if (!result.ok) throw databaseError(result);
 
     const row = result.data[0];
     return ok(res, { code, hostKey: hostKeyFor(row.id), event: hostEvent(row), attendees: [] }, 201);
